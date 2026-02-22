@@ -1,0 +1,1382 @@
+import React, { useState, useEffect, useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { 
+  Camera, Calendar, Users, Calculator, ArrowRight, ChevronDown, X, 
+  Settings, LayoutDashboard, ImagePlus, Trash2, Save, UploadCloud,
+  Type, MessageSquare, ToggleLeft, ToggleRight, BarChart3, TrendingUp,
+  Link as LinkIcon, ExternalLink, MapPin, CheckCircle, Loader2, Star, HelpCircle, ChevronUp, Plus, ChevronLeft, ChevronRight, Lock, Menu
+} from "lucide-react";
+
+// --- Firebase Imports ---
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc } from 'firebase/firestore';
+
+// --- Firebase Initialization (중복 실행 방지 및 환경설정 완료) ---
+let app, auth, db;
+try {
+  const firebaseConfig = {
+    apiKey: "AIzaSyDgfsV0pdtFAbG3hXFYwhCjxb8g6IQhbuk",
+    authDomain: "calculator-30cc8.firebaseapp.com",
+    projectId: "calculator-30cc8",
+    storageBucket: "calculator-30cc8.firebasestorage.app",
+    messagingSenderId: "992976775409",
+    appId: "1:992976775409:web:4b3541b364705e49b5e150"
+  };
+  
+  // 저장할 때마다 파이어베이스가 중복으로 켜지는 것을 방지
+  app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+  auth = getAuth(app);
+  db = getFirestore(app);
+} catch(e) {
+  console.error("Firebase init error:", e);
+}
+
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'family-photo-app';
+const getPath = (colName) => {
+  if (typeof __app_id !== 'undefined') {
+    return `artifacts/${appId}/public/data/${colName}`;
+  }
+  return colName; 
+};
+
+// --- Constants (Keys) ---
+const PRODUCT_TYPES = { FAMILY: "family", MATERNITY: "maternity", COUPLE: "couple" };
+const DATE_TYPES = { WEEKDAY: "weekday", WEEKEND: "weekend" };
+
+const FRAME_SIZES = [
+  { id: '5R', label: '5R', cm: '약 13x18 cm' },
+  { id: '8R', label: '8R', cm: '약 20x30 cm' },
+  { id: '12R', label: '12R', cm: '약 30x43 cm' },
+  { id: '16R', label: '16R', cm: '약 40x50 cm' },
+  { id: '20R', label: '20R', cm: '약 50x61 cm' },
+  { id: '24R', label: '24R', cm: '약 61x86 cm' },
+  { id: '30R', label: '30R', cm: '약 76x102 cm' },
+];
+
+const DEFAULT_CONFIG = {
+  prices: {
+    family: { weekday: 300000, weekend: 330000, basePeople: 4, extraPersonCost: 22000 },
+    maternity: { weekday: 250000, weekend: 270000, fixedPeople: 2 },
+    couple: { weekday: 200000, weekend: 220000, fixedPeople: 2 },
+  },
+  framePrices: {
+    wood: { '5R': 20000, '8R': 40000, '12R': 80000, '16R': 100000, '20R': 150000, '24R': 180000, '30R': 250000 },
+    frameless: { '5R': 30000, '8R': 50000, '12R': 100000, '16R': 130000, '20R': 180000, '24R': 230000, '30R': 300000 },
+  },
+  sliderImages: [],
+  reviewImages: [],
+  faqs: [
+    { question: "예약금은 얼마인가요?", answer: "예약금은 5만원이며, 촬영 당일 총 결제 금액에서 제외됩니다." },
+    { question: "의상 대여가 가능한가요?", answer: "네, 스튜디오에 다양한 사이즈의 드레스와 정장, 구두가 준비되어 있습니다.\n무료로 대여 가능합니다." },
+    { question: "원본 사진은 전부 제공되나요?", answer: "네! 촬영된 원본 사진은 색감 보정 후 모두 고화질로 제공해드리고 있습니다." }
+  ],
+  popupImage: null,
+  priceTableImage: null,
+  introText: "안녕하세요 ☺️ 투명하고 정직한 스튜디오입니다.\n원하시는 촬영 상품과 조건을 선택하시면 실제 견적을 즉시 확인하실 수 있습니다.",
+  popupEnabled: true,
+  popupText: "견적 계산기를 통해 안내된 금액 외에\n추가로 발생하는 비용은 절대 없습니다😊\n\n-정직한 스튜디오 비뉴뜨 올림-",
+  consultationText: "카카오톡 채팅 상담하기 →",
+  consultationLink: "http://pf.kakao.com/_udVXG",
+  bottomNoticeText: "해당 견적 이외에 추가비용은 절대 발생하지 않습니다.",
+};
+
+// --- Sub Components ---
+function SelectCustom({ value, onChange, options, label, disabled, className }) {
+  return (
+    <div className={`relative w-full ${className || ""}`}>
+      {label && <label className="block text-sm font-medium text-slate-500 mb-1.5 uppercase tracking-wider text-xs">{label}</label>}
+      <div className="relative">
+        <select
+          value={value}
+          onChange={(e) => {
+            const val = e.target.value;
+            onChange(options.some(o => typeof o.value === "number") ? Number(val) : val);
+          }}
+          disabled={disabled}
+          className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3.5 pr-10 text-[15px] sm:text-base shadow-sm transition-all focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50 hover:border-blue-500/50"
+        >
+          {options.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400"><ChevronDown className="h-5 w-5" /></div>
+      </div>
+    </div>
+  );
+}
+
+function RadioCard({ selected, onClick, title, description, disabled }) {
+  return (
+    <motion.button
+      whileTap={{ scale: disabled ? 1 : 0.98 }}
+      onClick={onClick}
+      disabled={disabled}
+      className={`relative flex w-full flex-col items-start rounded-2xl border p-4 sm:p-5 text-left transition-all duration-200 ${
+        selected ? "border-blue-500 bg-blue-50/50 ring-1 ring-blue-500/20 shadow-md shadow-blue-500/10" : "border-slate-200 bg-white hover:border-blue-500/40 hover:bg-slate-50 shadow-sm"
+      } ${disabled ? "cursor-not-allowed opacity-50 grayscale" : ""}`}
+    >
+      <div className="flex w-full items-center justify-between">
+        <span className={`text-[15px] sm:text-base font-bold ${selected ? "text-blue-700" : "text-slate-800"}`}>{title}</span>
+        {selected && <div className="h-2 w-2 sm:h-2.5 sm:w-2.5 rounded-full bg-blue-600 shadow-sm" />}
+      </div>
+      {description && <p className="mt-1 sm:mt-1.5 text-xs sm:text-sm font-medium text-slate-500">{description}</p>}
+    </motion.button>
+  );
+}
+
+// --- Views ---
+
+// 1. Calculator View (User Facing)
+function CalculatorView({ config, onEstimateComplete, visits }) {
+  const safeConfig = { ...DEFAULT_CONFIG, ...config, faqs: config.faqs || DEFAULT_CONFIG.faqs, reviewImages: config.reviewImages || [] };
+  
+  const [productType, setProductType] = useState(PRODUCT_TYPES.FAMILY);
+  const [dateType, setDateType] = useState(DATE_TYPES.WEEKDAY);
+  const [peopleCount, setPeopleCount] = useState(0); 
+  const [petCount, setPetCount] = useState(-1);
+  const [totalCost, setTotalCost] = useState(0);
+  
+  const [isPopupOpen, setIsPopupOpen] = useState(safeConfig.popupEnabled);
+  const [activeSlide, setActiveSlide] = useState(0);
+  const [hasTracked, setHasTracked] = useState(false);
+
+  // Sidebar State
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState("");
+
+  // Review Slider & Lightbox State
+  const [activeReviewSlide, setActiveReviewSlide] = useState(0);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
+
+  // FAQ State
+  const [openFaq, setOpenFaq] = useState(null);
+
+  // Visit Tracking
+  useEffect(() => {
+    const logVisit = async () => {
+      try {
+        let region = "알 수 없음";
+        try {
+          const res = await fetch('https://ipapi.co/json/');
+          const data = await res.json();
+          region = data.region || data.city || "대한민국";
+        } catch (e) {}
+        await addDoc(collection(db, getPath('visits')), { timestamp: Date.now(), region });
+      } catch (e) { console.error("Visit log error", e); }
+    };
+    logVisit();
+  }, []);
+
+  // Main Slider Timer
+  useEffect(() => {
+    if (!safeConfig.sliderImages || safeConfig.sliderImages.length === 0) return;
+    const timer = setInterval(() => setActiveSlide((prev) => (prev + 1) % safeConfig.sliderImages.length), 3500);
+    return () => clearInterval(timer);
+  }, [safeConfig.sliderImages]);
+
+  useEffect(() => setIsPopupOpen(safeConfig.popupEnabled), [safeConfig.popupEnabled]);
+
+  // Section Observer for Sidebar Active State
+  useEffect(() => {
+    const observer = new IntersectionObserver((entries) => {
+      let visibleSection = null;
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          visibleSection = entry.target.id;
+        }
+      });
+      if (visibleSection) setActiveSection(visibleSection);
+    }, { rootMargin: '-100px 0px -60% 0px', threshold: 0 });
+
+    const ids = ['section-options', 'section-estimate', 'section-price-table', 'section-reviews', 'section-faq', 'section-frame-prices', 'section-kakao'];
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+
+    return () => observer.disconnect();
+  }, [safeConfig]);
+
+  const handleProductChange = (type) => {
+    setProductType(type);
+    setPeopleCount(0); 
+  };
+
+  const getPeopleOptions = () => {
+    if (productType === PRODUCT_TYPES.MATERNITY || productType === PRODUCT_TYPES.COUPLE) return [{ value: 0, label: "인원 확인" }, { value: 2, label: "2인 (고정)" }];
+    const options = Array.from({ length: 18 }, (_, i) => ({ value: i + 3, label: `${i + 3}인` }));
+    return [{ value: 0, label: "인원 선택" }, ...options];
+  };
+
+  const getPetOptions = () => {
+    return [
+      { value: -1, label: "반려동물 선택" },
+      { value: 0, label: "없음" },
+      { value: 1, label: "1마리" },
+      { value: 2, label: "2마리" }
+    ];
+  };
+
+  useEffect(() => {
+    if (peopleCount === 0 || petCount === -1) {
+      setTotalCost(0);
+      return;
+    }
+    let cost = safeConfig.prices[productType][dateType];
+    if (productType === PRODUCT_TYPES.FAMILY && peopleCount > safeConfig.prices.family.basePeople) {
+      cost += (peopleCount - safeConfig.prices.family.basePeople) * safeConfig.prices.family.extraPersonCost;
+    }
+    if (petCount === 2) cost += 22000;
+    setTotalCost(cost);
+  }, [productType, dateType, peopleCount, petCount, safeConfig.prices]);
+
+  useEffect(() => {
+    if (totalCost > 0 && !hasTracked) {
+      onEstimateComplete({ productType, dateType, peopleCount, petCount, totalCost, timestamp: Date.now() });
+      setHasTracked(true);
+    } else if (totalCost === 0) {
+      setHasTracked(false);
+    }
+  }, [totalCost, productType, dateType, peopleCount, petCount]);
+
+  const formatCurrency = (amount) => new Intl.NumberFormat("ko-KR").format(amount);
+  const isWoodDefault = (size) => (productType === PRODUCT_TYPES.FAMILY && size === '16R') || ((productType === PRODUCT_TYPES.MATERNITY || productType === PRODUCT_TYPES.COUPLE) && size === '12R');
+
+  const todayVisitors = useMemo(() => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0,0,0,0);
+    return visits.filter(v => v.timestamp >= startOfToday.getTime()).length;
+  }, [visits]);
+
+  // --- 추가 계산 로직 ---
+  const basePeopleAmount = safeConfig.prices.family.basePeople;
+  const extraPeopleCount = productType === PRODUCT_TYPES.FAMILY && peopleCount > basePeopleAmount 
+    ? peopleCount - basePeopleAmount 
+    : 0;
+  const extraPeopleTotalCost = extraPeopleCount * safeConfig.prices.family.extraPersonCost;
+
+  // --- 네비게이션 스크롤 함수 ---
+  const scrollToSection = (id) => {
+    setIsSidebarOpen(false);
+    setTimeout(() => {
+      const element = document.getElementById(id);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 300); // 사이드바가 닫히는 애니메이션(0.3s) 이후 스크롤 실행
+  };
+
+  // --- 사이드바 메뉴 정의 ---
+  const SIDEBAR_MENUS = [
+    { id: 'section-options', label: '옵션 선택', icon: Camera, visible: true },
+    { id: 'section-estimate', label: '실시간 견적서', icon: Calculator, visible: true },
+    { id: 'section-price-table', label: '촬영 상품 가격표', icon: ImagePlus, visible: !!safeConfig.priceTableImage },
+    { id: 'section-reviews', label: '고객 리뷰', icon: Star, visible: safeConfig.reviewImages && safeConfig.reviewImages.length > 0 },
+    { id: 'section-faq', label: '자주 묻는 질문', icon: HelpCircle, visible: safeConfig.faqs && safeConfig.faqs.length > 0 },
+    { id: 'section-frame-prices', label: '액자 가격표', icon: ImagePlus, visible: true },
+    { id: 'section-kakao', label: '카카오톡 채팅 상담', icon: MessageSquare, visible: true },
+  ];
+
+  return (
+    <div className="min-h-full bg-slate-50 text-slate-800 font-sans pb-24 relative overflow-x-hidden pt-[56px] sm:pt-[60px]">
+      
+      {/* 1. Top Navigation Bar */}
+      <header className="fixed top-0 left-0 right-0 h-[56px] sm:h-[60px] bg-white/95 backdrop-blur-[16px] z-[90] flex items-center justify-between px-3 sm:px-4 border-b border-slate-100 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+        <button 
+          onClick={() => setIsSidebarOpen(true)} 
+          className="p-2 sm:p-2.5 rounded-full hover:bg-slate-100 transition-colors w-[44px] h-[44px] flex items-center justify-center"
+          aria-label="메뉴 열기"
+        >
+          <Menu className="w-6 h-6 text-slate-800" />
+        </button>
+        <h1 className="text-[16px] sm:text-[18px] font-semibold text-slate-900 absolute left-1/2 -translate-x-1/2 tracking-tight">비뉴뜨 견적계산기</h1>
+        <div className="w-[44px]" /> {/* 우측 여백 균형 */}
+      </header>
+
+      {/* 2. Sidebar Drawer */}
+      <AnimatePresence>
+        {isSidebarOpen && <motion.div key="sidebar-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/40 backdrop-blur-[10px] z-[999] touch-none" />}
+        {isSidebarOpen && (
+          <motion.div key="sidebar-panel" initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ ease: [0.4, 0, 0.2, 1], duration: 0.4 }} className="fixed top-0 left-0 bottom-0 w-[80%] max-w-[320px] bg-white z-[1000] shadow-2xl flex flex-col overflow-y-auto">
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white/95 backdrop-blur-md z-10">
+              <h2 className="text-xl font-bold text-slate-900 tracking-tight">메뉴</h2>
+              <button onClick={() => setIsSidebarOpen(false)} className="p-2 -mr-2 text-slate-400 hover:text-slate-800 rounded-full hover:bg-slate-100">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-3 flex-1 flex flex-col gap-1.5">
+              {SIDEBAR_MENUS.filter(menu => menu.visible).map(menu => {
+                const isActive = activeSection === menu.id;
+                const IconComponent = menu.icon; // JSX 에러 방지를 위해 변수 할당
+                return (
+                  <motion.button
+                    key={menu.id}
+                    whileTap={{ scale: 0.98, backgroundColor: "rgba(0,0,0,0.05)" }}
+                    onClick={() => scrollToSection(menu.id)}
+                    className={`w-full flex items-center gap-3.5 px-4 py-3.5 text-left text-[15px] font-semibold transition-colors rounded-2xl relative overflow-hidden ${
+                      isActive ? "text-[#1967D2] bg-[#E8F0FE]" : "text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <IconComponent className={`w-[22px] h-[22px] flex-shrink-0 ${isActive ? "text-[#1967D2]" : "text-slate-500"}`} />
+                    <span className="truncate">{menu.label}</span>
+                  </motion.button>
+                )
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* --- Lightbox (Review Expansion) --- */}
+      <AnimatePresence>
+        {lightboxIndex !== null && safeConfig.reviewImages[lightboxIndex] && (
+          <motion.div 
+            key="lightbox-overlay"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}
+            className="fixed inset-0 z-[2000] bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm touch-none"
+            onClick={() => setLightboxIndex(null)}
+          >
+            <button className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2 text-white/70 hover:text-white transition-colors bg-white/10 rounded-full z-50" onClick={() => setLightboxIndex(null)}>
+              <X className="w-7 h-7 sm:w-8 sm:h-8" />
+            </button>
+
+            {lightboxIndex > 0 && (
+              <button
+                className="absolute left-2 sm:left-8 top-1/2 -translate-y-1/2 p-2 sm:p-3 text-white/70 hover:text-white transition-colors bg-white/10 hover:bg-white/20 rounded-full z-50"
+                onClick={(e) => { e.stopPropagation(); setLightboxIndex(prev => prev - 1); }}
+              >
+                <ChevronLeft className="w-8 h-8 sm:w-10 sm:h-10" />
+              </button>
+            )}
+
+            <motion.img 
+              key={`lightbox-img-${lightboxIndex}`}
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              src={safeConfig.reviewImages[lightboxIndex]} alt="review-lightbox" 
+              className="w-full h-full object-contain max-w-4xl max-h-[85vh] sm:max-h-[90vh]" 
+              onClick={(e) => e.stopPropagation()} 
+            />
+
+            {lightboxIndex < safeConfig.reviewImages.length - 1 && (
+              <button
+                className="absolute right-2 sm:right-8 top-1/2 -translate-y-1/2 p-2 sm:p-3 text-white/70 hover:text-white transition-colors bg-white/10 hover:bg-white/20 rounded-full z-50"
+                onClick={(e) => { e.stopPropagation(); setLightboxIndex(prev => prev - 1); }}
+              >
+                <ChevronRight className="w-8 h-8 sm:w-10 sm:h-10" />
+              </button>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isPopupOpen && safeConfig.popupEnabled && (
+          <motion.div key="popup-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div className="absolute inset-0" onClick={() => setIsPopupOpen(false)} />
+            <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="relative bg-white rounded-3xl shadow-2xl max-w-xs sm:max-w-sm w-full p-6 sm:p-8 text-center z-10">
+              <button onClick={() => setIsPopupOpen(false)} className="absolute top-3 right-3 sm:top-4 sm:right-4 p-2 bg-slate-100 rounded-full text-slate-500 hover:text-slate-800"><X className="w-4 h-4 sm:w-5 sm:h-5" /></button>
+              {safeConfig.popupImage ? (
+                <div className="mx-auto w-24 h-24 sm:w-32 sm:h-32 rounded-full overflow-hidden mb-5 sm:mb-6 border-4 border-slate-50 shadow-inner"><img src={safeConfig.popupImage} alt="Popup" className="w-full h-full object-cover" /></div>
+              ) : (
+                <div className="mx-auto w-24 h-24 sm:w-32 sm:h-32 rounded-full mb-5 sm:mb-6 bg-slate-100 flex items-center justify-center text-slate-400 text-xs sm:text-sm border-4 border-white shadow-inner">사진 공란</div>
+              )}
+              <h2 className="text-xl sm:text-2xl font-bold text-slate-900 mb-3 sm:mb-4 tracking-tight">견적 계산기 안내</h2>
+              <p className="text-slate-600 mb-6 sm:mb-8 leading-relaxed whitespace-pre-line text-[13px] sm:text-sm">{safeConfig.popupText}</p>
+              <motion.button whileTap={{ scale: 0.95 }} onClick={() => setIsPopupOpen(false)} className="w-full py-3.5 sm:py-4 bg-slate-900 text-white rounded-xl sm:rounded-2xl font-bold text-base sm:text-lg hover:bg-slate-800 shadow-xl shadow-slate-900/20">10초만에 견적 계산하기</motion.button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8 py-8 md:py-12">
+        {/* Main Slider */}
+        <div className="mb-10 sm:mb-16 rounded-3xl sm:rounded-[2rem] overflow-hidden shadow-2xl shadow-slate-200/50 bg-white border-[3px] sm:border-4 border-white max-w-sm sm:max-w-md mx-auto relative aspect-square">
+           {safeConfig.sliderImages.length > 0 ? (
+             <>
+               <AnimatePresence initial={false}>
+                 <motion.img key={activeSlide} src={safeConfig.sliderImages[activeSlide]} alt="Slider" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.8 }} className="absolute inset-0 w-full h-full object-cover" />
+               </AnimatePresence>
+               <div className="absolute bottom-5 sm:bottom-6 left-0 right-0 flex justify-center gap-2 sm:gap-2.5 z-10">
+                 {safeConfig.sliderImages.map((_, i) => <div key={`dot-${i}`} className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${i === activeSlide ? 'w-5 sm:w-6 bg-white shadow-md' : 'w-1.5 sm:w-2 bg-white/60 hover:bg-white/90'}`} />)}
+               </div>
+             </>
+           ) : (
+             <div className="w-full h-full bg-slate-100 flex flex-col items-center justify-center text-slate-400 font-medium"><ImagePlus className="w-8 h-8 sm:w-10 sm:h-10 mb-2 opacity-50" /><p className="text-xs sm:text-sm text-center px-4">관리자에서 1:1 이미지를 업로드해주세요</p></div>
+           )}
+        </div>
+
+        <div className="text-center mb-10 sm:mb-16 space-y-3 sm:space-y-4 px-2">
+          <h1 className="text-[28px] sm:text-4xl md:text-5xl font-serif font-bold text-slate-900 tracking-tight leading-tight">가족사진 견적 계산기</h1>
+          <p className="text-[15px] sm:text-lg text-slate-500 max-w-2xl mx-auto font-medium whitespace-pre-line leading-relaxed px-2">{safeConfig.introText}</p>
+        </div>
+
+        <div className="grid lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-12 items-start">
+          <div id="section-options" className="lg:col-span-7 space-y-6 sm:space-y-8 scroll-mt-24">
+            <section className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100">
+              <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><Camera className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">촬영 상품 선택</h2></div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+                <RadioCard title="가족사진" description="3인 이상" selected={productType === PRODUCT_TYPES.FAMILY} onClick={() => handleProductChange(PRODUCT_TYPES.FAMILY)} />
+                <RadioCard title="만삭사진" description="2인 고정" selected={productType === PRODUCT_TYPES.MATERNITY} onClick={() => handleProductChange(PRODUCT_TYPES.MATERNITY)} />
+                <RadioCard title="부부/커플" description="2인 고정" selected={productType === PRODUCT_TYPES.COUPLE} onClick={() => handleProductChange(PRODUCT_TYPES.COUPLE)} />
+              </div>
+            </section>
+            
+            <section className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100">
+              <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><Calendar className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">희망 일정</h2></div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <RadioCard title="주중 / 평일" description="월요일 - 금요일" selected={dateType === DATE_TYPES.WEEKDAY} onClick={() => setDateType(DATE_TYPES.WEEKDAY)} />
+                <RadioCard title="주말 / 공휴일" description="토, 일, 공휴일" selected={dateType === DATE_TYPES.WEEKEND} onClick={() => setDateType(DATE_TYPES.WEEKEND)} />
+              </div>
+            </section>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
+              <section className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100 relative overflow-visible">
+                {peopleCount === 0 && <span className="absolute -top-2.5 right-5 sm:-top-3 sm:right-6 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 sm:py-1 rounded-full animate-bounce shadow-md shadow-red-500/30">필수</span>}
+                <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><Users className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">총 인원</h2></div>
+                <SelectCustom value={peopleCount} onChange={setPeopleCount} options={getPeopleOptions()} className={peopleCount === 0 ? "ring-2 ring-red-400/50 rounded-xl" : ""} />
+              </section>
+              <section className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100 relative overflow-visible">
+                {petCount === -1 && <span className="absolute -top-2.5 right-5 sm:-top-3 sm:right-6 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 sm:py-1 rounded-full animate-bounce shadow-md shadow-red-500/30">필수</span>}
+                <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><Camera className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">반려동물</h2></div>
+                <SelectCustom value={petCount} onChange={setPetCount} options={getPetOptions()} className={petCount === -1 ? "ring-2 ring-red-400/50 rounded-xl" : ""} />
+              </section>
+            </div>
+
+          </div>
+
+          <div className="lg:col-span-5 space-y-6 sm:space-y-8">
+            <div className="sticky top-[84px]"> {/* top-bar 고려하여 위치 조정 */}
+              <div id="section-estimate" className="bg-slate-900 text-white rounded-3xl sm:rounded-[2rem] p-6 sm:p-8 shadow-2xl relative overflow-hidden scroll-mt-24">
+                <div className="absolute top-0 right-0 w-64 h-64 sm:w-72 sm:h-72 bg-blue-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
+                <div className="relative z-10">
+                  <div className="flex items-center gap-2 sm:gap-3 mb-6 sm:mb-8 text-slate-300">
+                    <Calculator className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
+                    <span className="text-[13px] sm:text-sm font-bold uppercase tracking-widest">견적서</span>
+                  </div>
+                  <div className="space-y-4 sm:space-y-5 border-b border-white/10 pb-5 sm:pb-6 mb-5 sm:mb-6 text-[13px] sm:text-[15px]">
+                    <div className="flex justify-between items-center text-slate-300"><span>상품</span><span className="font-semibold text-white bg-white/10 px-2.5 sm:px-3 py-1 rounded-md sm:rounded-lg">{productType === PRODUCT_TYPES.FAMILY ? "가족사진" : productType === PRODUCT_TYPES.MATERNITY ? "만삭사진" : "부부/커플"}</span></div>
+                    <div className="flex justify-between items-center text-slate-300"><span>일정</span><span className="font-semibold text-white">{dateType === DATE_TYPES.WEEKDAY ? "주중/평일" : "주말/공휴일"}</span></div>
+                    <div className="flex justify-between items-center text-slate-300"><span>인원</span><span className="font-semibold text-white">{peopleCount === 0 ? <span className="text-yellow-400 animate-pulse">선택 대기중</span> : `${peopleCount}명`}</span></div>
+                    <div className="flex justify-between items-center text-slate-300"><span>반려동물</span><span className="font-semibold text-white">{petCount === -1 ? <span className="text-yellow-400 animate-pulse">선택 대기중</span> : petCount === 0 ? "없음" : `${petCount}마리`}</span></div>
+                    {totalCost > 0 && (
+                      <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="pt-2 space-y-3 sm:space-y-4">
+                        <div className="flex justify-between items-center text-slate-300"><span>액자</span><span className="font-semibold text-white text-right">{productType === PRODUCT_TYPES.FAMILY ? "16R 아크릴 우드 (약 40x50cm)" : "12R 아크릴 우드 (약 30x43cm)"}</span></div>
+                        <div className="flex justify-between items-center"><span className="font-semibold text-yellow-400 underline underline-offset-[3px] decoration-yellow-400/50">고화질 원본</span><span className="font-bold text-yellow-400">무료</span></div>
+                      </motion.div>
+                    )}
+                  </div>
+
+                  {/* 추가금 Box 영역 */}
+                  {totalCost > 0 && (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-6 space-y-3">
+                      {(extraPeopleCount > 0 || petCount > 0) ? (
+                        <>
+                          {petCount > 0 && (
+                            <div className="bg-slate-800/80 rounded-xl p-4 sm:p-5 flex justify-between items-center text-[13px] sm:text-[14px] shadow-inner border border-white/5">
+                              <span className="text-yellow-400 font-medium">반려동물 추가 ({petCount}마리)</span>
+                              <span className="text-yellow-400 font-bold">+ {formatCurrency(petCount === 2 ? 22000 : 0)} 원</span>
+                            </div>
+                          )}
+                          {extraPeopleCount > 0 && (
+                            <div className="bg-slate-800/80 rounded-xl p-4 sm:p-5 flex flex-col gap-2.5 text-[13px] sm:text-[14px] shadow-inner border border-white/5">
+                              <div className="flex justify-between items-center text-slate-300">
+                                <span>기본 인원 ({basePeopleAmount}인)</span>
+                                <span>포함</span>
+                              </div>
+                              <div className="flex justify-between items-center text-yellow-400">
+                                <span className="font-medium">추가 인원 ({extraPeopleCount}명)</span>
+                                <span className="font-bold">+ {formatCurrency(extraPeopleTotalCost)} 원</span>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="bg-slate-800/80 rounded-xl p-4 sm:p-5 flex justify-center items-center text-[13px] sm:text-[14px] text-slate-400 shadow-inner border border-white/5">
+                          추가금이 없습니다.
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+
+                  <div className="space-y-1 sm:space-y-2 mb-6 sm:mb-8">
+                    <div className="text-slate-400 text-xs sm:text-sm font-medium">견적 금액</div>
+                    <AnimatePresence mode="wait">
+                      {totalCost === 0 ? (
+                        <motion.div key="wait" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[15px] sm:text-lg font-bold text-yellow-400 py-2 sm:py-3">인원 및 반려동물을 모두 선택해주세요.</motion.div>
+                      ) : (
+                        <motion.div key="price" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-4xl sm:text-5xl font-serif font-bold text-white tracking-tight pt-1">{formatCurrency(totalCost)} <span className="text-lg sm:text-2xl text-slate-400 font-sans font-medium">원</span></motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  <motion.a whileTap={{ scale: 0.97 }} href={safeConfig.consultationLink} target="_blank" rel="noopener noreferrer" className="w-full py-3.5 sm:py-4 bg-white text-slate-900 rounded-xl sm:rounded-2xl font-bold text-[14px] min-[375px]:text-[15px] sm:text-lg hover:bg-slate-100 transition-colors flex items-center justify-center gap-1.5 sm:gap-2 group shadow-xl whitespace-nowrap">
+                    <span>{safeConfig.consultationText}</span><ArrowRight className="w-5 h-5 sm:w-6 sm:h-6 group-hover:translate-x-1.5 transition-transform" />
+                  </motion.a>
+                  <div className="mt-3 sm:mt-4 w-full text-center bg-white/5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl px-1 sm:px-2 overflow-hidden"><p className="text-[10.5px] min-[375px]:text-[11.5px] sm:text-[13px] text-slate-300 font-medium whitespace-nowrap tracking-tight sm:tracking-normal">{safeConfig.bottomNoticeText}</p></div>
+                </div>
+              </div>
+
+              {safeConfig.priceTableImage && (
+                <div id="section-price-table" className="mt-5 sm:mt-6 bg-white rounded-3xl sm:rounded-[2rem] p-3 sm:p-4 shadow-sm border border-slate-100 overflow-hidden scroll-mt-24">
+                   <h3 className="font-bold text-slate-800 mb-2 sm:mb-3 px-2 flex items-center gap-1.5 sm:gap-2 text-[15px] sm:text-base"><Calculator className="w-4 h-4 text-blue-500"/> 촬영 상품 가격표</h3>
+                   <img src={safeConfig.priceTableImage} alt="Price Table" className="w-full h-auto object-contain rounded-xl sm:rounded-2xl border border-slate-50" />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* --- Moved Review & FAQ Sections (Below Frame Prices) --- */}
+        <div className="mt-8 sm:mt-12 space-y-6 sm:space-y-8">
+          {/* --- Review Slider Section --- */}
+          {safeConfig.reviewImages && safeConfig.reviewImages.length > 0 && (
+            <section id="section-reviews" className="bg-white rounded-3xl sm:rounded-[2rem] py-6 sm:py-10 shadow-sm border border-slate-100 overflow-hidden scroll-mt-24">
+              <div className="flex items-center justify-center gap-2 mb-8 sm:mb-10 px-5">
+                <Star className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-400 fill-yellow-400" />
+                <h2 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">리뷰</h2>
+                <Star className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-400 fill-yellow-400" />
+              </div>
+              
+              <div className="relative h-[320px] sm:h-[420px] w-full flex items-center justify-center touch-pan-y">
+                {safeConfig.reviewImages.map((img, i) => {
+                  const offset = i - activeReviewSlide;
+                  // Limit rendering to nearby slides for performance
+                  if (Math.abs(offset) > 2) return null;
+
+                  return (
+                    <motion.div
+                      key={`review-slide-${i}`}
+                      drag="x"
+                      dragConstraints={{ left: 0, right: 0 }}
+                      dragElastic={0.2}
+                      onDragEnd={(e, info) => {
+                        if (info.offset.x < -50 && activeReviewSlide < safeConfig.reviewImages.length - 1) setActiveReviewSlide(prev => prev + 1);
+                        if (info.offset.x > 50 && activeReviewSlide > 0) setActiveReviewSlide(prev => prev - 1);
+                      }}
+                      initial={false}
+                      animate={{
+                        x: `calc(${offset * 105}%)`,
+                        scale: offset === 0 ? 1.1 : 0.9,
+                        opacity: offset === 0 ? 1 : Math.abs(offset) === 1 ? 0.5 : 0,
+                        filter: offset === 0 ? "blur(0px)" : "blur(2px)",
+                        zIndex: offset === 0 ? 10 : 5
+                      }}
+                      transition={{ duration: 0.35, ease: "easeInOut" }}
+                      onClick={() => {
+                        if (offset === 0) setLightboxIndex(i);
+                        else setActiveReviewSlide(i);
+                      }}
+                      className={`absolute w-[180px] sm:w-[240px] aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl cursor-pointer ${offset === 0 ? 'ring-2 ring-white/50' : ''}`}
+                    >
+                      <img src={img} alt={`Review ${i}`} className="w-full h-full object-cover pointer-events-none" draggable={false} />
+                    </motion.div>
+                  )
+                })}
+              </div>
+              <div className="flex justify-center gap-2 mt-8">
+                {safeConfig.reviewImages.map((_, i) => (
+                  <div key={`dot-${i}`} className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${i === activeReviewSlide ? 'w-5 sm:w-6 bg-slate-800' : 'w-1.5 sm:w-2 bg-slate-200'}`} />
+                ))}
+              </div>
+              <p className="text-center text-xs sm:text-sm text-slate-400 mt-4 px-4 font-medium">사진을 넘겨보거나 중앙 사진을 클릭하여 확대해보세요.</p>
+            </section>
+          )}
+
+          {/* --- FAQ Section --- */}
+          {safeConfig.faqs && safeConfig.faqs.length > 0 && (
+            <section id="section-faq" className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100 scroll-mt-24">
+              <div className="flex items-center gap-2 sm:gap-3 mb-6 sm:mb-8">
+                <div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><HelpCircle className="w-4 h-4 sm:w-5 sm:h-5" /></div>
+                <h2 className="text-[17px] sm:text-xl font-bold text-slate-800">자주 묻는 질문</h2>
+              </div>
+              <div className="space-y-3 sm:space-y-4">
+                {safeConfig.faqs.map((faq, i) => (
+                  <div key={`faq-item-${i}`} className={`rounded-xl sm:rounded-2xl border transition-colors ${openFaq === i ? 'border-blue-500 bg-blue-50/30' : 'border-slate-200 bg-white hover:border-blue-300'}`}>
+                    <button 
+                      onClick={() => setOpenFaq(openFaq === i ? null : i)} 
+                      className="w-full px-4 py-4 sm:px-6 sm:py-5 text-left flex justify-between items-center gap-4"
+                    >
+                      <span className={`text-[14px] sm:text-[15px] font-bold leading-snug ${openFaq === i ? 'text-blue-700' : 'text-slate-800'}`}>
+                        <span className="text-blue-500 mr-2 font-black">Q.</span>{faq.question}
+                      </span>
+                      <motion.div animate={{ rotate: openFaq === i ? 180 : 0 }} className="flex-shrink-0 text-slate-400">
+                        <ChevronDown className="w-5 h-5 sm:w-6 sm:h-6" />
+                      </motion.div>
+                    </button>
+                    <AnimatePresence initial={false}>
+                      {openFaq === i && (
+                        <motion.div key={`faq-content-${i}`} initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.3 }} className="overflow-hidden">
+                          <div className="px-4 pb-4 sm:px-6 sm:pb-5 text-[13px] sm:text-[14px] text-slate-600 whitespace-pre-line leading-relaxed border-t border-slate-100/50 pt-3 sm:pt-4">
+                            <span className="text-slate-400 font-bold mr-2">A.</span>{faq.answer}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* --- Frame Price Section Moved Here --- */}
+          <section id="section-frame-prices" className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100 scroll-mt-24">
+            <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><ImagePlus className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">액자 가격표 참고</h2></div>
+            <div className="mb-5 sm:mb-6 text-center text-[10.5px] min-[375px]:text-[11.5px] sm:text-[14px] text-white font-bold bg-slate-900 py-2.5 sm:py-3 rounded-lg sm:rounded-xl px-1 shadow-inner whitespace-nowrap tracking-tight sm:tracking-normal overflow-hidden">모든 촬영상품엔 아크릴 우드 프레임이 포함되어있습니다.</div>
+            <div className="space-y-8 sm:space-y-10">
+              <div className="w-full">
+                <h3 className="text-[15px] sm:text-lg font-bold mb-3 sm:mb-4 text-slate-800 px-1">아크릴 우드 프레임 액자</h3>
+                <table className="w-full text-[11.5px] min-[375px]:text-[12px] sm:text-sm md:text-[15px] text-left border-collapse">
+                  <thead><tr className="border-b-2 border-slate-200"><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 whitespace-nowrap">R 규격</th><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 whitespace-nowrap">약 cm 사이즈</th><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 text-right whitespace-nowrap">가격</th></tr></thead>
+                  <tbody className="text-slate-700">
+                    {FRAME_SIZES.map((item, idx) => {
+                      const isDefault = isWoodDefault(item.id);
+                      return (
+                        <tr key={`wood-${item.id}`} className={idx !== FRAME_SIZES.length - 1 ? "border-b border-slate-100" : ""}>
+                          <td className={`py-3 sm:py-3.5 px-1 sm:px-2 font-semibold whitespace-nowrap ${isDefault ? 'text-red-500' : ''}`}>{item.label} {isDefault && <span className="text-[10px] sm:text-xs ml-0.5">(기본 제공)</span>}</td>
+                          <td className={`py-3 sm:py-3.5 px-1 sm:px-2 whitespace-nowrap ${isDefault ? 'text-red-500 font-semibold' : ''}`}>{item.cm}</td>
+                          <td className={`py-3 sm:py-3.5 px-1 sm:px-2 text-right whitespace-nowrap ${isDefault ? 'text-red-500 font-bold' : ''}`}>{formatCurrency(safeConfig.framePrices.wood[item.id])}원</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="pt-5 sm:pt-6 border-t-2 border-slate-100 w-full">
+                <h3 className="text-[15px] sm:text-lg font-bold mb-3 sm:mb-4 text-slate-800 px-1">아크릴 프레임 리스 액자</h3>
+                <table className="w-full text-[11.5px] min-[375px]:text-[12px] sm:text-sm md:text-[15px] text-left border-collapse">
+                  <thead><tr className="border-b-2 border-slate-200"><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 whitespace-nowrap">R 규격</th><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 whitespace-nowrap">약 cm 사이즈</th><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 text-right whitespace-nowrap">가격</th></tr></thead>
+                  <tbody className="text-slate-700">
+                    {FRAME_SIZES.map((item, idx) => (
+                      <tr key={`frameless-${item.id}`} className={idx !== FRAME_SIZES.length - 1 ? "border-b border-slate-100" : ""}>
+                        <td className="py-3 sm:py-3.5 px-1 sm:px-2 font-semibold whitespace-nowrap">{item.label}</td><td className="py-3 sm:py-3.5 px-1 sm:px-2 whitespace-nowrap">{item.cm}</td><td className="py-3 sm:py-3.5 px-1 sm:px-2 text-right whitespace-nowrap">{formatCurrency(safeConfig.framePrices.frameless[item.id])}원</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          {/* --- Added Bottom Kakao Consultation Button --- */}
+          <div id="section-kakao" className="pt-2 sm:pt-4 flex justify-center pb-8 scroll-mt-24">
+            <motion.a whileTap={{ scale: 0.97 }} href={safeConfig.consultationLink} target="_blank" rel="noopener noreferrer" className="w-full max-w-lg py-4 sm:py-5 bg-[#FEE500] text-slate-900 rounded-2xl font-bold text-[15px] sm:text-[17px] hover:bg-[#FADA0A] transition-colors flex items-center justify-center gap-2 sm:gap-2.5 shadow-xl shadow-yellow-500/20">
+              <MessageSquare className="w-5 h-5 sm:w-6 sm:h-6" />
+              <span>{safeConfig.consultationText}</span>
+              <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6" />
+            </motion.a>
+          </div>
+        </div>
+
+        <div className="mt-8 sm:mt-10 mb-8 text-center">
+          <div className="inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 bg-white rounded-full text-[13px] sm:text-sm text-slate-500 shadow-sm border border-slate-200">
+            <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-500" />오늘 방문자 수 <strong className="text-slate-800 ml-0.5 sm:ml-1">{todayVisitors}</strong>명
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 2. Admin Settings View
+function AdminSettingsView({ config, onSaveConfig }) {
+  const safeConfig = { ...DEFAULT_CONFIG, ...config, faqs: config.faqs || DEFAULT_CONFIG.faqs, reviewImages: config.reviewImages || [] };
+  const [localConfig, setLocalConfig] = useState(safeConfig);
+  const [showToast, setShowToast] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => { setLocalConfig({ ...DEFAULT_CONFIG, ...config, faqs: config.faqs || DEFAULT_CONFIG.faqs, reviewImages: config.reviewImages || [] }); }, [config]);
+
+  const handlePriceChange = (product, date, value) => {
+    setLocalConfig(prev => ({...prev, prices: {...prev.prices, [product]: { ...prev.prices[product], [date]: Number(value) }}}));
+  };
+  const handleFramePriceChange = (type, size, value) => {
+    setLocalConfig(prev => ({...prev, framePrices: {...prev.framePrices, [type]: { ...prev.framePrices[type], [size]: Number(value) }}}));
+  };
+
+  const handleImageUpload = (e, type) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        // Set max width based on usage to prevent DB overload. Review images don't need to be huge.
+        const MAX_WIDTH = type === 'priceTable' ? 1200 : type === 'review' ? 600 : 800; 
+        const scaleSize = MAX_WIDTH / img.width;
+        canvas.width = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
+        canvas.height = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const base64 = canvas.toDataURL('image/jpeg', 0.8); 
+        
+        if (type === 'slider') setLocalConfig(prev => ({ ...prev, sliderImages: [...prev.sliderImages, base64] }));
+        else if (type === 'review') setLocalConfig(prev => ({ ...prev, reviewImages: [...prev.reviewImages, base64] }));
+        else if (type === 'popup') setLocalConfig(prev => ({ ...prev, popupImage: base64 }));
+        else if (type === 'priceTable') setLocalConfig(prev => ({ ...prev, priceTableImage: base64 }));
+      };
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeSliderImage = (index) => {
+    const newImages = [...localConfig.sliderImages];
+    newImages.splice(index, 1);
+    setLocalConfig({ ...localConfig, sliderImages: newImages });
+  };
+
+  const removeReviewImage = (index) => {
+    const newImages = [...localConfig.reviewImages];
+    newImages.splice(index, 1);
+    setLocalConfig({ ...localConfig, reviewImages: newImages });
+  };
+
+  const handleFaqChange = (index, field, value) => {
+    const newFaqs = [...localConfig.faqs];
+    newFaqs[index][field] = value;
+    setLocalConfig({ ...localConfig, faqs: newFaqs });
+  };
+
+  const addFaq = () => {
+    setLocalConfig({ ...localConfig, faqs: [...localConfig.faqs, { question: "", answer: "" }] });
+  };
+
+  const removeFaq = (index) => {
+    const newFaqs = [...localConfig.faqs];
+    newFaqs.splice(index, 1);
+    setLocalConfig({ ...localConfig, faqs: newFaqs });
+  };
+
+  const saveSettings = async () => {
+    setIsSaving(true);
+    await onSaveConfig(localConfig);
+    setIsSaving(false);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto p-4 sm:p-8 space-y-8 sm:space-y-12 relative pb-32">
+      <AnimatePresence>
+        {showToast && (
+          <motion.div key="toast-success" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="fixed top-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 sm:gap-3 bg-slate-900 text-white px-5 sm:px-6 py-3 sm:py-4 rounded-full shadow-2xl font-medium text-sm sm:text-base whitespace-nowrap">
+            <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" />설정이 성공적으로 저장되었습니다.
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div><h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">환경설정</h2><p className="text-slate-500 text-sm sm:text-base">앱의 텍스트, 버튼, 가격, 사진을 실시간으로 데이터베이스에 저장합니다.</p></div>
+
+      {/* 1. Image Settings */}
+      <section className="bg-white p-5 sm:p-8 rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200">
+        <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2 mb-6 sm:mb-8"><ImagePlus className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" /> 이미지 관리</h3>
+        <div className="space-y-8 sm:space-y-10">
+          <div>
+            <label className="flex items-center gap-2 text-[15px] sm:text-base font-bold text-slate-800 mb-3 sm:mb-4"><span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[11px] sm:text-xs">1:1 비율</span> 상단 메인 슬라이드 사진</label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+              {localConfig.sliderImages.map((img, idx) => (
+                <div key={`admin-slide-${idx}`} className="relative aspect-square rounded-xl sm:rounded-2xl overflow-hidden border border-slate-200 group bg-slate-50">
+                  <img src={img} alt={`Slide ${idx}`} className="w-full h-full object-cover" />
+                  <button onClick={() => removeSliderImage(idx)} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-6 h-6 sm:w-8 sm:h-8 text-white" /></button>
+                </div>
+              ))}
+              <label className="aspect-square rounded-xl sm:rounded-2xl border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 transition-colors flex flex-col items-center justify-center cursor-pointer text-slate-500 hover:text-blue-600">
+                <UploadCloud className="w-6 h-6 sm:w-8 sm:h-8 mb-1 sm:mb-2" /><span className="text-[13px] sm:text-sm font-bold">1:1 사진 추가</span><input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'slider')} />
+              </label>
+            </div>
+          </div>
+          
+          <hr className="border-slate-100" />
+          
+          <div>
+            <label className="flex items-center gap-2 text-[15px] sm:text-base font-bold text-slate-800 mb-3 sm:mb-4"><span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[11px] sm:text-xs">3:4 세로 비율</span> 리뷰 슬라이더 사진</label>
+            <p className="text-[12px] sm:text-sm text-slate-500 mb-4">화면 하단 리뷰 슬라이더에 표시될 세로형 사진들을 업로드하세요.</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+              {localConfig.reviewImages.map((img, idx) => (
+                <div key={`admin-review-${idx}`} className="relative aspect-[3/4] rounded-xl sm:rounded-2xl overflow-hidden border border-slate-200 group bg-slate-50">
+                  <img src={img} alt={`Review ${idx}`} className="w-full h-full object-cover" />
+                  <button onClick={() => removeReviewImage(idx)} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-6 h-6 sm:w-8 sm:h-8 text-white" /></button>
+                </div>
+              ))}
+              <label className="aspect-[3/4] rounded-xl sm:rounded-2xl border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 transition-colors flex flex-col items-center justify-center cursor-pointer text-slate-500 hover:text-blue-600">
+                <UploadCloud className="w-6 h-6 sm:w-8 sm:h-8 mb-1 sm:mb-2" /><span className="text-[13px] sm:text-sm font-bold">3:4 사진 추가</span><input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'review')} />
+              </label>
+            </div>
+          </div>
+
+          <hr className="border-slate-100" />
+          
+          <div className="grid md:grid-cols-2 gap-6 sm:gap-8">
+            <div className="bg-slate-50 p-5 sm:p-6 rounded-2xl border border-slate-100">
+              <label className="block text-[14px] sm:text-sm font-bold text-slate-800 mb-3 sm:mb-4">안내 팝업용 사진 (동그랗게 표시됨)</label>
+              {localConfig.popupImage ? (
+                <div className="relative w-24 h-24 sm:w-32 sm:h-32 rounded-full overflow-hidden border border-slate-200 group bg-white shadow-sm mb-3 sm:mb-4">
+                  <img src={localConfig.popupImage} alt="Popup" className="w-full h-full object-cover" />
+                  <button onClick={() => setLocalConfig({...localConfig, popupImage: null})} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-5 h-5 sm:w-6 sm:h-6 text-white" /></button>
+                </div>
+              ) : (
+                <label className="w-24 h-24 sm:w-32 sm:h-32 rounded-full border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 flex flex-col items-center justify-center cursor-pointer text-slate-500 hover:text-blue-600 mb-3 sm:mb-4 bg-white"><UploadCloud className="w-5 h-5 sm:w-6 sm:h-6 mb-1" /><span className="text-[11px] sm:text-xs font-bold">업로드</span><input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'popup')} /></label>
+              )}
+              <p className="text-[11px] sm:text-xs text-slate-500">팝업 상단에 동그랗게 들어가는 사진입니다.</p>
+            </div>
+            <div className="bg-slate-50 p-5 sm:p-6 rounded-2xl border border-slate-100">
+              <label className="block text-[14px] sm:text-sm font-bold text-slate-800 mb-3 sm:mb-4">하단 상품 가격표 이미지 <span className="text-blue-500 font-normal">(원본비율 적용)</span></label>
+              {localConfig.priceTableImage ? (
+                <div className="relative rounded-xl overflow-hidden border border-slate-200 group bg-white shadow-sm mb-3 sm:mb-4 max-w-xs">
+                  <img src={localConfig.priceTableImage} alt="Price Table" className="w-full h-auto object-contain" />
+                  <button onClick={() => setLocalConfig({...localConfig, priceTableImage: null})} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-6 h-6 sm:w-8 sm:h-8 text-white" /></button>
+                </div>
+              ) : (
+                <label className="w-full h-24 sm:h-32 rounded-xl border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 flex flex-col items-center justify-center cursor-pointer text-slate-500 hover:text-blue-600 mb-3 sm:mb-4 bg-white"><UploadCloud className="w-5 h-5 sm:w-6 sm:h-6 mb-1" /><span className="text-[13px] sm:text-sm font-bold">가격표 업로드</span><input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'priceTable')} /></label>
+              )}
+              <p className="text-[11px] sm:text-xs text-slate-500">결과 화면 우측 하단에 들어가는 상세 표입니다.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 2. Text & Popup Settings */}
+      <section className="bg-white p-5 sm:p-8 rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200">
+        <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2 mb-6 sm:mb-8"><Type className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" /> 문구 및 팝업 설정</h3>
+        <div className="space-y-6 sm:space-y-8">
+          <div>
+            <label className="block text-[15px] sm:text-base font-bold text-slate-800 mb-2 sm:mb-3">메인 상단 소개글</label>
+            <textarea value={localConfig.introText} onChange={(e) => setLocalConfig({...localConfig, introText: e.target.value})} className="w-full p-3.5 sm:p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-y min-h-[90px] sm:min-h-[100px] text-sm sm:text-base leading-relaxed bg-slate-50" />
+          </div>
+          <div className="pt-6 sm:pt-8 border-t border-slate-100">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 sm:mb-4 gap-3 sm:gap-4">
+              <label className="text-[15px] sm:text-base font-bold text-slate-800 flex items-center gap-2"><MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500" /> 접속 시 안내 팝업 설정</label>
+              <button onClick={() => setLocalConfig({...localConfig, popupEnabled: !localConfig.popupEnabled})} className={`self-start sm:self-auto flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full text-xs sm:text-sm font-bold transition-colors shadow-sm ${localConfig.popupEnabled ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                {localConfig.popupEnabled ? <ToggleRight className="w-4 h-4 sm:w-5 sm:h-5" /> : <ToggleLeft className="w-4 h-4 sm:w-5 sm:h-5" />} {localConfig.popupEnabled ? '팝업 활성화됨' : '팝업 꺼짐'}
+              </button>
+            </div>
+            <textarea value={localConfig.popupText} onChange={(e) => setLocalConfig({...localConfig, popupText: e.target.value})} disabled={!localConfig.popupEnabled} className={`w-full p-3.5 sm:p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-y min-h-[100px] sm:min-h-[120px] text-sm sm:text-base leading-relaxed ${!localConfig.popupEnabled ? 'bg-slate-100 opacity-60' : 'bg-slate-50'}`} />
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ Settings */}
+      <section className="bg-white p-5 sm:p-8 rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200">
+        <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center justify-between mb-6 sm:mb-8">
+          <div className="flex items-center gap-2"><HelpCircle className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" /> 자주 묻는 질문 (FAQ)</div>
+          <button onClick={addFaq} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 font-bold rounded-lg text-sm hover:bg-blue-100 transition-colors">
+            <Plus className="w-4 h-4" /> 항목 추가
+          </button>
+        </h3>
+        <div className="space-y-4">
+          {localConfig.faqs.map((faq, idx) => (
+            <div key={`admin-faq-${idx}`} className="bg-slate-50 border border-slate-200 rounded-xl p-4 sm:p-5 relative group">
+              <button onClick={() => removeFaq(idx)} className="absolute top-4 right-4 text-slate-400 hover:text-red-500 transition-colors"><Trash2 className="w-5 h-5" /></button>
+              <div className="space-y-3 pr-8">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 mb-1.5 block">질문 (Question)</label>
+                  <input value={faq.question} onChange={(e) => handleFaqChange(idx, 'question', e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium" placeholder="질문을 입력하세요" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 mb-1.5 block">답변 (Answer)</label>
+                  <textarea value={faq.answer} onChange={(e) => handleFaqChange(idx, 'answer', e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm resize-y min-h-[80px]" placeholder="답변을 입력하세요" />
+                </div>
+              </div>
+            </div>
+          ))}
+          {localConfig.faqs.length === 0 && <p className="text-center text-slate-400 py-4 text-sm">등록된 질문이 없습니다.</p>}
+        </div>
+      </section>
+
+      {/* 3. Button & Links Settings */}
+      <section className="bg-white p-5 sm:p-8 rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200">
+        <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2 mb-6 sm:mb-8"><LinkIcon className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" /> 하단 상담 버튼 설정</h3>
+        <div className="space-y-5 sm:space-y-6">
+          <div>
+            <label className="block text-sm font-bold text-slate-800 mb-2">상담 버튼 문구</label>
+            <input value={localConfig.consultationText} onChange={(e) => setLocalConfig({...localConfig, consultationText: e.target.value})} className="w-full p-3 sm:p-3.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm sm:text-base bg-slate-50" />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-800 mb-2">상담 연결 링크 (URL)</label>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+              <input value={localConfig.consultationLink} onChange={(e) => setLocalConfig({...localConfig, consultationLink: e.target.value})} className="flex-1 p-3 sm:p-3.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm sm:text-base bg-slate-50" placeholder="https://..." />
+              <motion.button whileTap={{ scale: 0.95 }} onClick={() => window.open(localConfig.consultationLink, '_blank')} className="flex items-center justify-center gap-2 px-5 py-3 sm:px-6 sm:py-3.5 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-700 transition-colors whitespace-nowrap text-sm sm:text-base"><ExternalLink className="w-4 h-4 sm:w-5 sm:h-5" />링크 접속 테스트</motion.button>
+            </div>
+          </div>
+          <div className="pt-5 sm:pt-6 border-t border-slate-100">
+            <label className="block text-sm font-bold text-slate-800 mb-2">버튼 아래 추가 안내문구</label>
+            <input value={localConfig.bottomNoticeText} onChange={(e) => setLocalConfig({...localConfig, bottomNoticeText: e.target.value})} className="w-full p-3 sm:p-3.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm sm:text-base bg-slate-50" />
+          </div>
+        </div>
+      </section>
+
+      {/* 4. Product Price Settings */}
+      <section className="bg-white p-5 sm:p-8 rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200">
+        <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2 mb-6 sm:mb-8"><Calculator className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" /> 상품 단가 설정 (원)</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
+          <div className="p-4 sm:p-5 bg-slate-50 rounded-2xl border border-slate-200"><h4 className="font-bold text-slate-800 mb-3 sm:mb-4 text-base sm:text-lg">가족사진 <span className="text-xs text-slate-500 font-medium">(기본 4인)</span></h4><div className="space-y-3 sm:space-y-4"><div><label className="text-xs font-bold text-slate-500">평일</label><input type="number" value={localConfig.prices.family.weekday} onChange={(e) => handlePriceChange('family', 'weekday', e.target.value)} className="w-full p-2.5 sm:p-3 mt-1 sm:mt-1.5 border border-slate-200 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-medium text-sm sm:text-base" /></div><div><label className="text-xs font-bold text-slate-500">주말/공휴일</label><input type="number" value={localConfig.prices.family.weekend} onChange={(e) => handlePriceChange('family', 'weekend', e.target.value)} className="w-full p-2.5 sm:p-3 mt-1 sm:mt-1.5 border border-slate-200 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-medium text-sm sm:text-base" /></div></div></div>
+          <div className="p-4 sm:p-5 bg-slate-50 rounded-2xl border border-slate-200"><h4 className="font-bold text-slate-800 mb-3 sm:mb-4 text-base sm:text-lg">만삭사진 <span className="text-xs text-slate-500 font-medium">(고정 2인)</span></h4><div className="space-y-3 sm:space-y-4"><div><label className="text-xs font-bold text-slate-500">평일</label><input type="number" value={localConfig.prices.maternity.weekday} onChange={(e) => handlePriceChange('maternity', 'weekday', e.target.value)} className="w-full p-2.5 sm:p-3 mt-1 sm:mt-1.5 border border-slate-200 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-medium text-sm sm:text-base" /></div><div><label className="text-xs font-bold text-slate-500">주말/공휴일</label><input type="number" value={localConfig.prices.maternity.weekend} onChange={(e) => handlePriceChange('maternity', 'weekend', e.target.value)} className="w-full p-2.5 sm:p-3 mt-1 sm:mt-1.5 border border-slate-200 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-medium text-sm sm:text-base" /></div></div></div>
+          <div className="p-4 sm:p-5 bg-slate-50 rounded-2xl border border-slate-200"><h4 className="font-bold text-slate-800 mb-3 sm:mb-4 text-base sm:text-lg">부부/커플 <span className="text-xs text-slate-500 font-medium">(고정 2인)</span></h4><div className="space-y-3 sm:space-y-4"><div><label className="text-xs font-bold text-slate-500">평일</label><input type="number" value={localConfig.prices.couple.weekday} onChange={(e) => handlePriceChange('couple', 'weekday', e.target.value)} className="w-full p-2.5 sm:p-3 mt-1 sm:mt-1.5 border border-slate-200 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-medium text-sm sm:text-base" /></div><div><label className="text-xs font-bold text-slate-500">주말/공휴일</label><input type="number" value={localConfig.prices.couple.weekend} onChange={(e) => handlePriceChange('couple', 'weekend', e.target.value)} className="w-full p-2.5 sm:p-3 mt-1 sm:mt-1.5 border border-slate-200 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-medium text-sm sm:text-base" /></div></div></div>
+        </div>
+      </section>
+
+      {/* 5. Frame Price Settings */}
+      <section className="bg-white p-5 sm:p-8 rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200">
+        <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2 mb-6 sm:mb-8"><Calculator className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" /> 액자 사이즈별 단가 (원)</h3>
+        <div className="grid md:grid-cols-2 gap-6 sm:gap-8">
+          <div className="p-5 sm:p-6 bg-slate-50 rounded-2xl border border-slate-200">
+            <h4 className="font-bold text-slate-800 mb-4 sm:mb-6 text-base sm:text-lg border-b border-slate-200 pb-2.5 sm:pb-3">아크릴 우드 프레임</h4>
+            <div className="space-y-3 sm:space-y-4">
+              {FRAME_SIZES.map((size) => (
+                <div key={`wood-${size.id}`} className="flex items-center justify-between gap-3 sm:gap-4"><div className="w-16 sm:w-20"><span className="text-[13px] sm:text-sm font-bold text-slate-700">{size.label}</span></div><input type="number" value={localConfig.framePrices.wood[size.id]} onChange={(e) => handleFramePriceChange('wood', size.id, e.target.value)} className="flex-1 p-2 sm:p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-right font-medium text-sm sm:text-base" /></div>
+              ))}
+            </div>
+          </div>
+          <div className="p-5 sm:p-6 bg-slate-50 rounded-2xl border border-slate-200">
+            <h4 className="font-bold text-slate-800 mb-4 sm:mb-6 text-base sm:text-lg border-b border-slate-200 pb-2.5 sm:pb-3">아크릴 프레임 리스</h4>
+            <div className="space-y-3 sm:space-y-4">
+              {FRAME_SIZES.map((size) => (
+                <div key={`frameless-${size.id}`} className="flex items-center justify-between gap-3 sm:gap-4"><div className="w-16 sm:w-20"><span className="text-[13px] sm:text-sm font-bold text-slate-700">{size.label}</span></div><input type="number" value={localConfig.framePrices.frameless[size.id]} onChange={(e) => handleFramePriceChange('frameless', size.id, e.target.value)} className="flex-1 p-2 sm:p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-right font-medium text-sm sm:text-base" /></div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Floating Save Bar */}
+      <div className="fixed sm:sticky bottom-4 sm:bottom-4 left-4 right-4 sm:left-0 sm:right-0 bg-white/95 backdrop-blur-md p-3 sm:p-4 rounded-2xl shadow-2xl border border-slate-200 flex flex-col sm:flex-row justify-end items-center gap-3 sm:gap-4 z-40">
+        <button onClick={() => setLocalConfig(safeConfig)} className="w-full sm:w-auto px-5 sm:px-6 py-3 sm:py-3.5 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors text-sm sm:text-base">설정 초기화</button>
+        <motion.button whileTap={{ scale: 0.95 }} onClick={saveSettings} disabled={isSaving} className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 sm:px-8 py-3.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/30 text-base sm:text-lg disabled:opacity-50">
+          {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />} 
+          데이터베이스에 저장
+        </motion.button>
+      </div>
+    </div>
+  );
+}
+
+// 3. Statistics View (Admin) 
+function StatisticsView({ visits, estimates }) {
+  const [dateFilter, setDateFilter] = useState('all');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+
+  const filteredData = useMemo(() => {
+    const now = Date.now();
+    const getStartOfDay = (offsetDays = 0) => {
+      const d = new Date();
+      d.setDate(d.getDate() - offsetDays);
+      d.setHours(0,0,0,0);
+      return d.getTime();
+    };
+
+    let startTime = 0;
+    let endTime = now;
+
+    if (dateFilter === 'today') startTime = getStartOfDay(0);
+    else if (dateFilter === 'yesterday') { startTime = getStartOfDay(1); endTime = getStartOfDay(0) - 1; }
+    else if (dateFilter === '7days') startTime = getStartOfDay(7);
+    else if (dateFilter === '14days') startTime = getStartOfDay(14);
+    else if (dateFilter === '1month') startTime = getStartOfDay(30);
+    else if (dateFilter === 'custom') {
+      if (customStart) startTime = new Date(customStart).setHours(0,0,0,0);
+      if (customEnd) endTime = new Date(customEnd).setHours(23,59,59,999);
+    }
+
+    const fVisits = visits.filter(v => v.timestamp >= startTime && v.timestamp <= endTime);
+    const fEstimates = estimates.filter(e => e.timestamp >= startTime && e.timestamp <= endTime);
+
+    const visitors = fVisits.length;
+    const calculations = fEstimates.length;
+    const conversionRate = visitors > 0 ? ((calculations / visitors) * 100).toFixed(1) : 0;
+    const revenue = fEstimates.reduce((sum, e) => sum + e.totalCost, 0);
+
+    const productCounts = { family: 0, maternity: 0, couple: 0 };
+    fEstimates.forEach(e => { if (productCounts[e.productType] !== undefined) productCounts[e.productType]++; });
+    const topProductKey = Object.keys(productCounts).reduce((a, b) => productCounts[a] > productCounts[b] ? a : b);
+    const popular = calculations > 0 ? (topProductKey === 'family' ? '가족사진' : topProductKey === 'maternity' ? '만삭사진' : '부부/커플') : '-';
+
+    const chartData = [
+      { label: '가족', value: productCounts.family },
+      { label: '만삭', value: productCounts.maternity },
+      { label: '부부', value: productCounts.couple },
+    ];
+
+    const regionCounts = {};
+    fVisits.forEach(v => {
+      const r = v.region || '기타';
+      regionCounts[r] = (regionCounts[r] || 0) + 1;
+    });
+    const regions = Object.entries(regionCounts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 7);
+
+    return { visitors, calculations, conversionRate, popular, revenue, chartData, regions };
+  }, [visits, estimates, dateFilter, customStart, customEnd]);
+
+  return (
+    <div className="max-w-5xl mx-auto p-4 sm:p-8 space-y-6 sm:space-y-8 pb-20">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
+        <div>
+          <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-1 sm:mb-2">통계 인사이트 (DB 연동)</h2>
+          <p className="text-slate-500 text-[13px] sm:text-base">클라우드에 저장된 실제 접속 및 견적 데이터를 분석합니다.</p>
+        </div>
+        
+        <div className="flex flex-col xl:flex-row xl:items-center bg-white border border-slate-200 rounded-xl p-1.5 shadow-sm gap-1">
+          <div className="flex flex-wrap items-center gap-1 w-full xl:w-auto">
+            {[
+              { id: 'today', label: '오늘' },
+              { id: 'yesterday', label: '어제' },
+              { id: '7days', label: '최근 7일' },
+              { id: '14days', label: '최근 14일' },
+              { id: '1month', label: '최근 1개월' },
+              { id: 'custom', label: '기간 선택' },
+              { id: 'all', label: '전체' }
+            ].map(f => (
+              <button key={f.id} onClick={() => setDateFilter(f.id)} className={`px-2.5 sm:px-3.5 py-2 text-[12px] sm:text-[13px] font-bold rounded-lg transition-colors flex-1 sm:flex-none whitespace-nowrap ${dateFilter === f.id ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+          {dateFilter === 'custom' && (
+            <div className="flex items-center gap-1.5 mt-2 xl:mt-0 xl:ml-2 px-2 pb-1.5 xl:pb-0">
+              <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className="w-full xl:w-auto px-2 py-1.5 text-[12px] sm:text-[13px] font-medium border border-slate-200 rounded-lg outline-none text-slate-700 bg-slate-50 focus:bg-white focus:border-blue-500 transition-colors" />
+              <span className="text-slate-400 font-bold">~</span>
+              <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="w-full xl:w-auto px-2 py-1.5 text-[12px] sm:text-[13px] font-medium border border-slate-200 rounded-lg outline-none text-slate-700 bg-slate-50 focus:bg-white focus:border-blue-500 transition-colors" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
+        <div className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-[2rem] border border-slate-100 shadow-sm flex flex-col">
+          <span className="text-[11px] sm:text-sm font-bold text-slate-500 mb-1.5 sm:mb-2">총 페이지 방문자 (실제)</span>
+          <span className="text-xl sm:text-3xl font-bold text-slate-900">{new Intl.NumberFormat().format(filteredData.visitors)}명</span>
+        </div>
+        <div className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-[2rem] border border-slate-100 shadow-sm flex flex-col relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-16 h-16 sm:w-20 sm:h-20 bg-blue-500/10 rounded-full blur-xl translate-x-1/2 -translate-y-1/2" />
+          <span className="text-[11px] sm:text-sm font-bold text-blue-600 mb-1.5 sm:mb-2">견적계산완료</span>
+          <span className="text-xl sm:text-3xl font-bold text-slate-900">{new Intl.NumberFormat().format(filteredData.calculations)}건</span>
+          <div className="mt-2 sm:mt-3 text-[10px] sm:text-xs font-bold text-slate-500">방문자 전환율: <strong className="text-blue-600">{filteredData.conversionRate}%</strong></div>
+        </div>
+        <div className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-[2rem] border border-slate-100 shadow-sm flex flex-col">
+          <span className="text-[11px] sm:text-sm font-bold text-slate-500 mb-1.5 sm:mb-2">최다 조회 상품</span>
+          <span className="text-xl sm:text-3xl font-bold text-slate-900">{filteredData.calculations > 0 ? filteredData.popular : '-'}</span>
+        </div>
+        <div className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-[2rem] border border-slate-100 shadow-sm flex flex-col">
+          <span className="text-[11px] sm:text-sm font-bold text-slate-500 mb-1.5 sm:mb-2">예상 견적 총액 (DB기준)</span>
+          <span className="text-lg sm:text-2xl font-bold text-slate-900">{new Intl.NumberFormat().format(filteredData.revenue)}원</span>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-4 sm:gap-6">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl sm:rounded-[2rem] border border-slate-100 shadow-sm">
+          <h3 className="text-base sm:text-lg font-bold text-slate-800 mb-5 sm:mb-8 flex items-center gap-2"><TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500" /> 상품별 관심도</h3>
+          <div className="space-y-4 sm:space-y-6">
+            {filteredData.chartData.map((item, idx) => {
+              const max = Math.max(...filteredData.chartData.map(d => d.value), 1);
+              const percentage = (item.value / max) * 100;
+              return (
+                <div key={`stat-chart-${idx}`} className="flex items-center gap-3 sm:gap-4">
+                  <div className="w-10 sm:w-12 text-xs sm:text-sm font-bold text-slate-600">{item.label}</div>
+                  <div className="flex-1 h-4 sm:h-5 bg-slate-100 rounded-full overflow-hidden">
+                    <motion.div initial={{ width: 0 }} animate={{ width: `${percentage}%` }} transition={{ duration: 1, type: "spring" }} className="h-full bg-blue-500 rounded-full" />
+                  </div>
+                  <div className="w-12 sm:w-14 text-xs sm:text-sm font-bold text-slate-800 text-right">{new Intl.NumberFormat().format(item.value)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="bg-white p-5 sm:p-8 rounded-3xl sm:rounded-[2rem] border border-slate-100 shadow-sm">
+          <h3 className="text-base sm:text-lg font-bold text-slate-800 mb-5 sm:mb-8 flex items-center gap-2"><MapPin className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500" /> 접속 지역 통계 (Top 7)</h3>
+          <div className="space-y-3 sm:space-y-4">
+            {filteredData.regions.length > 0 ? filteredData.regions.map((item, idx) => {
+              const max = filteredData.regions[0].value;
+              const percentage = (item.value / max) * 100;
+              return (
+                <div key={`region-${idx}`} className="flex items-center gap-3 sm:gap-4">
+                  <div className="w-12 sm:w-14 text-xs sm:text-sm font-bold text-slate-600 truncate">{item.name}</div>
+                  <div className="flex-1 h-2.5 sm:h-3 bg-slate-50 rounded-full overflow-hidden">
+                    <motion.div initial={{ width: 0 }} animate={{ width: `${percentage}%` }} transition={{ duration: 1, delay: 0.2, type: "spring" }} className="h-full bg-slate-800 rounded-full" />
+                  </div>
+                  <div className="w-8 sm:w-10 text-[10px] sm:text-xs font-bold text-slate-500 text-right">{new Intl.NumberFormat().format(item.value)}</div>
+                </div>
+              );
+            }) : <div className="text-sm text-slate-400 text-center py-4">아직 수집된 지역 데이터가 없습니다.</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 4. Admin Login View
+function AdminLoginView({ onLogin }) {
+  const [id, setId] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (id === "beanute" && password === "chsh040617") {
+      onLogin();
+    } else {
+      setError("아이디 또는 비밀번호가 일치하지 않습니다.");
+    }
+  };
+
+  return (
+    <div className="flex h-screen items-center justify-center bg-slate-100 p-4 font-sans relative overflow-hidden">
+      <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-72 h-72 bg-purple-500/10 rounded-full blur-3xl translate-y-1/3 -translate-x-1/3 pointer-events-none" />
+      
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-white p-8 sm:p-10 rounded-3xl shadow-2xl w-full max-w-sm border border-slate-200 relative z-10">
+        <div className="flex justify-center mb-6">
+           <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl shadow-inner"><Lock className="w-8 h-8 sm:w-10 sm:h-10" /></div>
+        </div>
+        <h2 className="text-2xl sm:text-3xl font-bold text-center text-slate-800 mb-2 tracking-tight">관리자 로그인</h2>
+        <p className="text-center text-slate-500 text-sm mb-8">안전한 데이터 관리를 위해 로그인해주세요.</p>
+        
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1.5">아이디</label>
+            <input 
+              type="text" 
+              value={id} 
+              onChange={(e) => { setId(e.target.value); setError(""); }} 
+              className="w-full p-3.5 sm:p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-[15px] bg-slate-50 focus:bg-white" 
+              placeholder="아이디를 입력하세요" 
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1.5">비밀번호</label>
+            <input 
+              type="password" 
+              value={password} 
+              onChange={(e) => { setPassword(e.target.value); setError(""); }} 
+              className="w-full p-3.5 sm:p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-[15px] bg-slate-50 focus:bg-white" 
+              placeholder="비밀번호를 입력하세요" 
+            />
+          </div>
+          {error && <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-red-500 text-[13px] font-bold text-center">{error}</motion.p>}
+          <button type="submit" className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/20 text-base mt-2">
+            접속하기
+          </button>
+        </form>
+      </motion.div>
+    </div>
+  );
+}
+
+// 5. 완벽한 에러 감지기 (ErrorBoundary) 추가 - 하얀 화면 방지
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error("React Error Boundary caught an error:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex h-screen items-center justify-center bg-red-50 p-4 font-sans">
+          <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-xl max-w-lg w-full border border-red-200">
+            <h1 className="text-2xl font-bold text-red-600 mb-4 flex items-center gap-2">
+              <X className="w-6 h-6" /> 화면에 오류가 발생했습니다!
+            </h1>
+            <p className="text-slate-600 text-sm mb-4 leading-relaxed">
+              코드를 불러오는 중 문제가 발생했습니다. 파이어베이스 설정이나 네트워크 연결을 확인해주세요.
+            </p>
+            <div className="bg-slate-100 p-4 rounded-xl overflow-x-auto text-xs text-red-500 font-mono mb-6 whitespace-pre-wrap">
+              {this.state.error?.toString()}
+            </div>
+            <button onClick={() => window.location.reload()} className="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold transition-colors">
+              새로고침 시도하기
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// --- Main App Component (Root) ---
+function MainApp() {
+  const [activeTab, setActiveTab] = useState("preview"); 
+  const isClientMode = window.location.search.includes('client=true');
+
+  const [user, setUser] = useState(null);
+  const [isDbReady, setIsDbReady] = useState(false);
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  
+  const [config, setConfig] = useState(DEFAULT_CONFIG);
+  const [visits, setVisits] = useState([]);
+  const [estimates, setEstimates] = useState([]);
+
+  useEffect(() => {
+    if (!auth) {
+      console.warn("Auth is not initialized. Skipping Firebase Auth.");
+      setIsDbReady(true);
+      return;
+    }
+    const initAuth = async () => {
+      try {
+        await signInAnonymously(auth);
+      } catch(e) { 
+        console.error("Auth error", e); 
+        // 인증에 실패하더라도 무조건 데이터를 볼 수 있도록 강제 통과 처리
+        setIsDbReady(true);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      // 인증 성공 여부와 상관없이 무조건 앱을 렌더링 시킵니다.
+      setIsDbReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!isDbReady || !db) return;
+
+    let unsubConfig = () => {};
+    let unsubVisits = () => {};
+    let unsubEstimates = () => {};
+
+    try {
+      unsubConfig = onSnapshot(doc(db, getPath('config'), 'main'), (docSnap) => {
+        if (docSnap.exists()) setConfig(docSnap.data());
+        else setDoc(doc(db, getPath('config'), 'main'), DEFAULT_CONFIG);
+      }, err => console.error("Config fetch error:", err));
+
+      unsubVisits = onSnapshot(collection(db, getPath('visits')), (snap) => {
+        const v = [];
+        snap.forEach(d => v.push(d.data()));
+        setVisits(v);
+      }, err => console.error("Visits fetch error:", err));
+
+      unsubEstimates = onSnapshot(collection(db, getPath('estimates')), (snap) => {
+        const e = [];
+        snap.forEach(d => e.push(d.data()));
+        setEstimates(e);
+      }, err => console.error("Estimates fetch error:", err));
+    } catch(e) {
+      console.error("Firestore onSnapshot setup error:", e);
+    }
+
+    return () => { 
+      unsubConfig(); 
+      unsubVisits(); 
+      unsubEstimates(); 
+    };
+  }, [isDbReady]);
+
+  const saveConfigToDB = async (newConfig) => {
+    if (!db) return;
+    try { await setDoc(doc(db, getPath('config'), 'main'), newConfig); } 
+    catch (e) { console.error("Save config error:", e); }
+  };
+
+  const trackEstimateToDB = async (data) => {
+    if (!db) return;
+    try { await addDoc(collection(db, getPath('estimates')), data); } 
+    catch (e) { console.error("Track estimate error:", e); }
+  };
+
+  if (!isDbReady) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50 flex-col gap-4 text-slate-500">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+        <p className="font-medium">데이터베이스 연결 중...</p>
+      </div>
+    );
+  }
+
+  // 고객용 뷰 (클라이언트 모드)
+  if (isClientMode) return <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} />;
+
+  // 관리자 모드 접속 시, 로그인 확인
+  if (!isAdminAuthenticated) {
+    return <AdminLoginView onLogin={() => setIsAdminAuthenticated(true)} />;
+  }
+
+  // 관리자 대시보드
+  return (
+    <div className="flex flex-col md:flex-row h-screen overflow-hidden bg-slate-100 selection:bg-blue-200">
+      <aside className="w-full md:w-64 bg-slate-900 text-slate-300 flex flex-col shadow-2xl z-20 flex-shrink-0 md:h-full">
+        <div className="p-4 sm:p-6 pb-2 sm:pb-4 flex items-center justify-between md:flex-col md:items-start md:justify-start">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">비뉴뜨</h1>
+            <p className="text-[10px] sm:text-xs text-blue-400 mt-0.5 sm:mt-1 uppercase tracking-wider font-bold">Admin Dashboard</p>
+          </div>
+          <button 
+            onClick={() => {
+              const url = new URL(window.location.href);
+              url.searchParams.set('client', 'true');
+              window.open(url.toString(), '_blank');
+            }}
+            className="md:hidden flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-bold transition-colors"
+          >
+            <ExternalLink className="w-3.5 h-3.5" /> 고객용
+          </button>
+        </div>
+        
+        <nav className="flex md:flex-col gap-1.5 sm:gap-2 px-3 sm:px-4 pb-3 sm:pb-4 md:pb-0 overflow-x-auto md:overflow-visible no-scrollbar mt-1 md:mt-4">
+          <button onClick={() => setActiveTab("preview")} className={`flex-shrink-0 md:w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3.5 rounded-xl transition-all font-bold text-[13px] sm:text-base ${activeTab === "preview" ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"}`}>
+            <LayoutDashboard className="w-4 h-4 sm:w-5 sm:h-5" /><span>미리보기</span>
+          </button>
+          <button onClick={() => setActiveTab("settings")} className={`flex-shrink-0 md:w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3.5 rounded-xl transition-all font-bold text-[13px] sm:text-base ${activeTab === "settings" ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"}`}>
+            <Settings className="w-4 h-4 sm:w-5 sm:h-5" /><span>환경설정 (DB연동)</span>
+          </button>
+          <button onClick={() => setActiveTab("statistics")} className={`flex-shrink-0 md:w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3.5 rounded-xl transition-all font-bold text-[13px] sm:text-base ${activeTab === "statistics" ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "hover:bg-slate-800 hover:text-white"}`}>
+            <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5" /><span>통계 (Real Data)</span>
+          </button>
+        </nav>
+
+        <div className="hidden md:block p-4 mt-auto border-t border-slate-800">
+          <button 
+            onClick={() => {
+              const url = new URL(window.location.href);
+              url.searchParams.set('client', 'true');
+              window.open(url.toString(), '_blank');
+            }}
+            className="w-full flex items-center justify-center gap-2 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl text-sm font-bold transition-colors"
+          >
+            <ExternalLink className="w-4 h-4" /> 고객용 링크 새창열기
+          </button>
+        </div>
+      </aside>
+
+      <main className="flex-1 overflow-y-auto relative scroll-smooth bg-slate-100">
+        <AnimatePresence mode="wait">
+          {activeTab === "preview" && (
+            <motion.div key="preview" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
+              <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} />
+            </motion.div>
+          )}
+          {activeTab === "settings" && (
+            <motion.div key="settings" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
+              <AdminSettingsView config={config} onSaveConfig={saveConfigToDB} />
+            </motion.div>
+          )}
+          {activeTab === "statistics" && (
+            <motion.div key="statistics" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
+              <StatisticsView visits={visits} estimates={estimates} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <MainApp />
+    </ErrorBoundary>
+  );
+}
