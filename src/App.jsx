@@ -4,13 +4,13 @@ import {
   Camera, Calendar, Users, Calculator, ArrowRight, ChevronDown, X, 
   Settings, LayoutDashboard, ImagePlus, Trash2, Save, UploadCloud,
   Type, MessageSquare, ToggleLeft, ToggleRight, BarChart3, TrendingUp,
-  Link as LinkIcon, ExternalLink, MapPin, CheckCircle, Loader2, Star, HelpCircle, ChevronUp, Plus, ChevronLeft, ChevronRight, Lock, Menu, Folder, FileText
+  Link as LinkIcon, ExternalLink, MapPin, CheckCircle, Loader2, Star, HelpCircle, ChevronUp, Plus, ChevronLeft, ChevronRight, Lock, Menu, Folder, FileText, AlignLeft, AlignCenter, AlignRight, Quote, Link2, MonitorPlay, Maximize, Columns, List, ListOrdered, Bold, Underline
 } from "lucide-react";
 
 // --- Firebase Imports ---
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc, deleteDoc, getDoc, writeBatch } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
 let app, auth, db;
@@ -75,22 +75,7 @@ const DEFAULT_CONFIG = {
   ],
   blogTitle: "Vignette Journal",
   blogSubtitle: "비뉴뜨만의 따뜻한 촬영 기록과 정보를 만나보세요.",
-  blogFolders: [
-    {
-      id: "folder_1",
-      title: "인원별 구성",
-      posts: [
-        {
-          id: "post_1",
-          title: "[추가금은 0원, 만족도는 1000%] 정직한 부산 가족사진 비뉴뜨 스튜디오 촬영 안내 + 가격",
-          date: "2026.01.23.",
-          tags: [{ id: "tag1", text: "블로그", color: "bg-red-500" }, { id: "tag2", text: "필독", color: "bg-blue-500" }],
-          thumbnail: "",
-          link: "https://m.blog.naver.com"
-        }
-      ]
-    }
-  ],
+  blogFolders: [],
   popupImage: null,
   priceTableImage: null,
   introText: "안녕하세요 ☺️ 투명하고 정직한 스튜디오입니다.\n원하시는 촬영 상품과 조건을 선택하시면 실제 견적을 즉시 확인하실 수 있습니다.",
@@ -229,6 +214,238 @@ function TagEditor({ tags, onChange }) {
     </div>
   );
 }
+
+// --- Chunked Media Resolving Hook ---
+// 전역 캐시를 통해 여러 곳에서 동일한 미디어를 호출할 때 반복 로딩을 방지합니다.
+const globalMediaCache = new Map();
+
+function useMediaUrl(src) {
+  const [objectUrl, setObjectUrl] = useState(() => globalMediaCache.get(src) || null);
+  
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!src) {
+      setObjectUrl(null);
+      return;
+    }
+    
+    // 캐시에 이미 로드된 데이터가 있다면 즉시 반환
+    if (globalMediaCache.has(src)) {
+      setObjectUrl(globalMediaCache.get(src));
+      return;
+    }
+    
+    // 청크 데이터가 아닌 단순 URL/Base64인 경우
+    if (!src.startsWith('chunked:')) {
+      setObjectUrl(src);
+      return;
+    }
+    
+    const [, id, count] = src.split(':');
+    
+    const fetchChunks = async () => {
+      try {
+        const numCount = Number(count);
+        let base64Str = '';
+        
+        // 🔥 청크 단위 병렬 로딩 (10개씩 배치 처리하여 Firebase 429 오류 완벽 방지)
+        for (let i = 0; i < numCount; i += 10) {
+          const promises = [];
+          const end = Math.min(i + 10, numCount);
+          for(let j=i; j<end; j++) {
+            promises.push(getDoc(doc(db, getPath('image_chunks'), `${id}_${j}`)));
+          }
+          const snaps = await Promise.all(promises);
+          if (!isMounted) return;
+          base64Str += snaps.map(s => s.exists() ? s.data().data : '').join('');
+        }
+        
+        const fetchRes = await fetch(base64Str);
+        const blob = await fetchRes.blob();
+        if (!isMounted) return;
+        
+        const url = URL.createObjectURL(blob);
+        globalMediaCache.set(src, url); // 로컬 캐시에 저장
+        setObjectUrl(url);
+      } catch(e) {
+        console.error("Chunk fetch error", e);
+      }
+    };
+    fetchChunks();
+    
+    return () => { 
+      isMounted = false; 
+    };
+  }, [src]);
+
+  return objectUrl;
+}
+
+// --- Smart Components that Handle Chunked Data Automatically ---
+function SmartImage({ src, alt, className, style, ...props }) {
+  const resolvedUrl = useMediaUrl(src);
+  if (!resolvedUrl) return <div className={`flex items-center justify-center bg-slate-100/50 text-slate-400 ${className}`} style={style}><Loader2 className="w-6 h-6 animate-spin"/></div>;
+  return <img src={resolvedUrl} alt={alt} className={className} style={style} {...props} />;
+}
+
+function SmartVideo({ src, className, style, ...props }) {
+  const resolvedUrl = useMediaUrl(src);
+  if (!resolvedUrl) return <div className={`flex items-center justify-center bg-slate-100/50 text-slate-400 ${className}`} style={style}><Loader2 className="w-6 h-6 animate-spin"/></div>;
+  return <video src={resolvedUrl} autoPlay muted loop playsInline className={className} style={style} {...props} />;
+}
+
+const SmartMotionImage = motion(React.forwardRef(({ src, ...props }, ref) => {
+  const resolvedUrl = useMediaUrl(src);
+  if (!resolvedUrl) return <div ref={ref} className={`flex items-center justify-center bg-slate-100/50 ${props.className}`}><Loader2 className="w-6 h-6 animate-spin text-slate-400"/></div>;
+  return <img ref={ref} src={resolvedUrl} {...props} />;
+}));
+
+
+// --- 블록 파서 & 렌더러 (클라이언트 뷰어 용) ---
+const renderRichText = (text) => {
+  if (!text) return null;
+  // **굵게** 와 __밑줄__ 파싱
+  const parts = text.split(/(\*\*.*?\*\*|__.*?__)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i} className="font-bold text-slate-900">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('__') && part.endsWith('__')) {
+      return <u key={i} className="underline decoration-slate-400 underline-offset-4">{part.slice(2, -2)}</u>;
+    }
+    return <React.Fragment key={i}>{part}</React.Fragment>;
+  });
+};
+
+const BlockViewer = ({ block }) => {
+  const [sliderIndex, setSliderIndex] = useState(0);
+  const alignClass = block.align === 'center' ? 'text-center' : block.align === 'right' ? 'text-right' : 'text-left';
+
+  switch (block.type) {
+    case 'h1':
+      return <h1 className={`text-2xl sm:text-3xl font-bold text-slate-900 mt-8 mb-4 tracking-tight leading-snug break-keep ${alignClass}`}>{renderRichText(block.content)}</h1>;
+    case 'h2':
+      return <h2 className={`text-xl sm:text-2xl font-bold text-slate-800 mt-6 mb-3 tracking-tight break-keep ${alignClass}`}>{renderRichText(block.content)}</h2>;
+    case 'text':
+      return <p className={`text-[15px] sm:text-[16px] leading-relaxed text-slate-700 mb-4 whitespace-pre-wrap break-keep ${alignClass}`}>{renderRichText(block.content)}</p>;
+    case 'ul':
+      return (
+        <ul className={`list-disc list-inside space-y-1 my-4 px-2 text-[15px] sm:text-[16px] text-slate-700 ${alignClass}`}>
+          {block.content.split('\n').filter(l => l.trim()).map((l, i) => <li key={i}>{renderRichText(l)}</li>)}
+        </ul>
+      );
+    case 'ol':
+      return (
+        <ol className={`list-decimal list-inside space-y-1 my-4 px-2 text-[15px] sm:text-[16px] text-slate-700 ${alignClass}`}>
+          {block.content.split('\n').filter(l => l.trim()).map((l, i) => <li key={i}>{renderRichText(l)}</li>)}
+        </ol>
+      );
+    case 'quote':
+      return (
+        <blockquote className="border-l-4 border-blue-500 bg-blue-50/50 p-4 sm:p-5 my-6 rounded-r-xl">
+          <p className="text-[15px] sm:text-[16px] font-medium text-slate-700 italic whitespace-pre-wrap">{renderRichText(block.content)}</p>
+        </blockquote>
+      );
+    case 'callout':
+      return (
+        <div className="flex gap-3 bg-slate-100/80 p-4 rounded-xl my-5 border border-slate-200">
+          <span className="text-xl flex-shrink-0 pt-0.5">{block.icon || '💡'}</span>
+          <p className={`text-[14px] sm:text-[15px] text-slate-700 leading-relaxed font-medium pt-0.5 whitespace-pre-wrap ${alignClass}`}>{renderRichText(block.content)}</p>
+        </div>
+      );
+    case 'image':
+      if (!block.url) return null;
+      return (
+        <figure className="my-6">
+          <SmartImage src={block.url} alt={block.caption || 'Image'} className="w-full h-auto rounded-2xl shadow-sm object-cover" />
+          {block.caption && <figcaption className="text-center text-xs sm:text-sm text-gray-500 mt-2 font-medium">{block.caption}</figcaption>}
+        </figure>
+      );
+    case 'slider':
+      if (!block.urls || block.urls.length === 0) return null;
+      const aspectClass = block.ratio === '1:1' ? 'aspect-square' : 'aspect-[4/5]';
+      return (
+        <div className={`relative w-full ${aspectClass} rounded-2xl overflow-hidden shadow-sm my-6 bg-slate-100 group`}>
+          <AnimatePresence initial={false}>
+            <SmartMotionImage 
+              key={sliderIndex}
+              src={block.urls[sliderIndex]} 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          </AnimatePresence>
+          {block.urls.length > 1 && (
+            <>
+              <button onClick={() => setSliderIndex((prev) => (prev > 0 ? prev - 1 : block.urls.length - 1))} className="absolute left-3 top-1/2 -translate-y-1/2 p-2 bg-black/40 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><ChevronLeft className="w-5 h-5"/></button>
+              <button onClick={() => setSliderIndex((prev) => (prev < block.urls.length - 1 ? prev + 1 : 0))} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-black/40 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><ChevronRight className="w-5 h-5"/></button>
+              <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-1.5 z-10">
+                {block.urls.map((_, i) => <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i === sliderIndex ? 'w-4 bg-white shadow-md' : 'w-1.5 bg-white/50'}`} />)}
+              </div>
+            </>
+          )}
+        </div>
+      );
+    case 'video':
+      if (!block.url) return null;
+      return (
+        <div className="my-6 rounded-2xl overflow-hidden shadow-sm bg-black relative w-full flex justify-center min-h-[200px]">
+          <SmartVideo src={block.url} className="w-full object-cover max-h-[80vh]" />
+        </div>
+      );
+    case 'beforeAfter':
+      if (!block.beforeUrl || !block.afterUrl) return null;
+      return <BeforeAfterViewer before={block.beforeUrl} after={block.afterUrl} />;
+    case 'link':
+      return (
+        <div className={`my-6 ${alignClass}`}>
+          <a href={block.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-4 w-full p-3 sm:p-4 bg-white border border-slate-200 hover:border-blue-400 hover:shadow-md hover:bg-blue-50/50 rounded-2xl transition-all group text-left">
+            {block.thumbnail && (
+              <div className="w-16 h-16 sm:w-20 sm:h-20 flex-shrink-0 rounded-xl overflow-hidden bg-slate-100 shadow-sm border border-slate-100">
+                <SmartImage src={block.thumbnail} className="w-full h-full object-cover" />
+              </div>
+            )}
+            <div className="flex-1 flex flex-col justify-center">
+              <span className="font-bold text-[15px] sm:text-[16px] text-slate-800 group-hover:text-blue-700 line-clamp-1">{block.text || block.url}</span>
+              <span className="text-[11px] sm:text-xs text-slate-400 line-clamp-1 mt-0.5">{block.url}</span>
+            </div>
+            <ExternalLink className="w-5 h-5 text-slate-300 group-hover:text-blue-500 flex-shrink-0 mr-2" />
+          </a>
+        </div>
+      );
+    default:
+      return null;
+  }
+};
+
+const BeforeAfterViewer = ({ before, after }) => {
+  const [pos, setPos] = useState(50);
+
+  return (
+    <div className="relative w-full aspect-[4/5] overflow-hidden rounded-2xl shadow-sm my-6 select-none group touch-none bg-slate-100">
+      <SmartImage src={after} className="absolute inset-0 w-full h-full object-cover pointer-events-none" alt="After" />
+      <SmartImage src={before} className="absolute inset-0 w-full h-full object-cover pointer-events-none" style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }} alt="Before" />
+      
+      {/* 슬라이더 라인 */}
+      <div className="absolute top-0 bottom-0 w-[3px] bg-white flex items-center justify-center pointer-events-none shadow-[0_0_10px_rgba(0,0,0,0.5)] z-10" style={{ left: `calc(${pos}% - 1.5px)` }}>
+        <div className="w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center border border-slate-200 text-slate-500">
+          <ChevronLeft className="w-5 h-5 -mr-1" /><ChevronRight className="w-5 h-5" />
+        </div>
+      </div>
+      
+      {/* 실제 조작용 투명 Range Input */}
+      <input 
+        type="range" min="0" max="100" value={pos} onChange={e => setPos(Number(e.target.value))}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize m-0 p-0 z-20 touch-pan-x"
+      />
+      
+      <div className="absolute top-4 left-4 bg-black/50 text-white text-[10px] sm:text-xs font-bold px-2 py-1 rounded-md backdrop-blur-sm pointer-events-none z-10">Before</div>
+      <div className="absolute top-4 right-4 bg-blue-600/80 text-white text-[10px] sm:text-xs font-bold px-2 py-1 rounded-md backdrop-blur-sm pointer-events-none z-10">After</div>
+    </div>
+  );
+};
+
 
 // --- Views ---
 
@@ -496,7 +713,14 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
                 {safeConfig.sliderImages.length > 0 ? (
                   <>
                     <AnimatePresence initial={false}>
-                      <motion.img key={activeSlide} src={safeConfig.sliderImages[activeSlide]} alt="Slider" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.8 }} className="absolute inset-0 w-full h-full object-cover" />
+                      <SmartMotionImage 
+                        key={activeSlide} 
+                        src={safeConfig.sliderImages[activeSlide]} 
+                        alt="Slider" 
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
+                        transition={{ duration: 0.8 }} 
+                        className="absolute inset-0 w-full h-full object-cover" 
+                      />
                     </AnimatePresence>
                     <div className="absolute bottom-5 sm:bottom-6 left-0 right-0 flex justify-center gap-2 sm:gap-2.5 z-10">
                       {safeConfig.sliderImages.map((_, i) => <div key={`dot-${i}`} className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${i === activeSlide ? 'w-5 sm:w-6 bg-white shadow-md' : 'w-1.5 sm:w-2 bg-white/60 hover:bg-white/90'}`} />)}
@@ -618,7 +842,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
                     {safeConfig.priceTableImage && (
                       <div id="section-price-table" className="mt-5 sm:mt-6 bg-white rounded-3xl sm:rounded-[2rem] p-3 sm:p-4 shadow-sm border border-slate-100 overflow-hidden scroll-mt-24">
                         <h3 className="font-bold text-slate-800 mb-2 sm:mb-3 px-2 flex items-center gap-1.5 sm:gap-2 text-[15px] sm:text-base"><Calculator className="w-4 h-4 text-blue-500"/> 촬영 상품 가격표</h3>
-                        <img src={safeConfig.priceTableImage} alt="Price Table" className="w-full h-auto object-contain rounded-xl sm:rounded-2xl border border-slate-50" />
+                        <SmartImage src={safeConfig.priceTableImage} alt="Price Table" className="w-full h-auto object-contain rounded-xl sm:rounded-2xl border border-slate-50" />
                       </div>
                     )}
                   </div>
@@ -665,7 +889,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
                             }}
                             className={`absolute w-[280px] sm:w-[380px] aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl cursor-pointer ${offset === 0 ? 'ring-2 ring-white/50' : ''}`}
                           >
-                            <img src={img} alt={`Review ${i}`} className="w-full h-full object-cover pointer-events-none bg-slate-50" draggable={false} />
+                            <SmartImage src={img} alt={`Review ${i}`} className="w-full h-full object-cover pointer-events-none bg-slate-50" draggable={false} />
                           </motion.div>
                         )
                       })}
@@ -810,7 +1034,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
                               className="bg-slate-800/40 p-3 sm:p-4 rounded-2xl border border-slate-700/50 flex gap-4 cursor-pointer hover:bg-slate-700 hover:border-slate-600 transition-colors group shadow-sm"
                             >
                               <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-xl overflow-hidden bg-slate-900 flex-shrink-0 shadow-inner">
-                                {post.thumbnail ? <img src={post.thumbnail} className="w-full h-full object-cover" alt={post.title} /> : <div className="w-full h-full flex items-center justify-center text-slate-600"><ImagePlus className="w-6 h-6" /></div>}
+                                {post.thumbnail ? <SmartImage src={post.thumbnail} className="w-full h-full object-cover" alt={post.title} /> : <div className="w-full h-full flex items-center justify-center text-slate-600"><ImagePlus className="w-6 h-6" /></div>}
                               </div>
                               <div className="flex-1 flex flex-col justify-center sm:justify-between py-1">
                                 <div className="space-y-2 sm:space-y-3">
@@ -862,7 +1086,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
               </button>
             )}
 
-            <motion.img 
+            <SmartMotionImage 
               key={`lightbox-img-${lightboxIndex}`}
               initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
               src={safeConfig.reviewImages[lightboxIndex]} alt="review-lightbox" 
@@ -882,86 +1106,74 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
         )}
       </AnimatePresence>
 
-      {/* --- Blog Slide Sheet (Bottom Sheet Modal) --- */}
+      {/* --- Blog Viewer Modal (In-app Reading) 90% Size --- */}
       <AnimatePresence>
         {selectedPost && (
-          <>
-            <motion.div key="sheet-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedPost(null)} className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[2000]" />
-            <motion.div 
-              key="sheet-content"
-              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed bottom-0 left-0 right-0 h-[85vh] sm:h-[80vh] max-w-2xl mx-auto bg-white rounded-t-[2.5rem] z-[2010] shadow-2xl flex flex-col overflow-hidden"
+          <motion.div 
+            key="blog-viewer-modal"
+            initial={{ opacity: 0, y: 50, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 50, scale: 0.95 }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            className="fixed inset-0 z-[2000] flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-sm"
+            onClick={() => setSelectedPost(null)}
+          >
+            <div 
+              className="w-full max-w-4xl h-[90vh] bg-white rounded-[2rem] flex flex-col overflow-hidden shadow-2xl relative"
+              onClick={(e) => e.stopPropagation()}
             >
-              {/* 상단 닫기 핸들 */}
-              <div className="pt-4 sm:pt-5 pb-3 flex items-center justify-center relative bg-white z-20 flex-shrink-0">
-                <div className="w-12 h-1.5 bg-slate-200 hover:bg-slate-300 transition-colors rounded-full cursor-grab active:cursor-grabbing" onClick={() => setSelectedPost(null)} />
-              </div>
-              
-              <button 
-                onClick={() => setSelectedPost(null)} 
-                className="absolute top-4 right-4 sm:top-5 sm:right-5 p-2 bg-slate-100/80 backdrop-blur-md rounded-full text-slate-500 hover:text-slate-800 hover:bg-slate-200 transition-colors z-[2050]"
-              >
-                <X className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2.5} />
-              </button>
-
-              {/* 안내 컨텐츠 뷰 (iframe 대체) */}
-              <div className="flex-1 overflow-y-auto bg-slate-50 px-5 sm:px-8 pt-4 pb-28">
-                <div className="max-w-xl mx-auto">
-                  {selectedPost.thumbnail ? (
-                    <div className="w-full max-w-md mx-auto aspect-square rounded-2xl overflow-hidden shadow-sm mb-6 border border-slate-200 bg-white">
-                      <img src={selectedPost.thumbnail} className="w-full h-full object-cover" alt={selectedPost.title} />
-                    </div>
-                  ) : (
-                    <div className="w-full max-w-md mx-auto aspect-square bg-slate-200 rounded-2xl flex flex-col items-center justify-center mb-6 border border-slate-300">
-                      <ImagePlus className="w-12 h-12 text-slate-400 mb-2" />
-                      <span className="text-slate-500 text-sm font-medium">등록된 이미지가 없습니다</span>
-                    </div>
+              {/* 뷰어 헤더 */}
+              <div className="flex-shrink-0 h-[60px] border-b border-slate-100 flex items-center justify-between px-4 sm:px-6 sticky top-0 z-10 bg-white/95 backdrop-blur">
+                <span className="font-bold text-slate-800 text-[15px] sm:text-lg truncate max-w-[50%]">{selectedPost.title}</span>
+                <div className="flex items-center gap-2">
+                  {selectedPost.link && (
+                    <button onClick={() => window.open(selectedPost.link, '_blank')} className="flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors">
+                      <ExternalLink className="w-4 h-4" /> 외부 링크
+                    </button>
                   )}
-                  
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {selectedPost.tags?.map((t, idx) => {
-                      const isObj = typeof t === 'object';
-                      const text = isObj ? t.text : t;
-                      const color = isObj ? t.color : (idx % 2 === 0 ? "bg-red-500" : "bg-blue-600");
-                      return <span key={isObj ? t.id : idx} className={`${color} text-white text-[11px] font-bold px-2.5 py-1 rounded-md shadow-sm`}>{text}</span>;
-                    })}
-                  </div>
-                  
-                  <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mb-3 leading-snug tracking-tight">{selectedPost.title}</h3>
-                  <div className="text-sm text-slate-500 font-medium mb-8 flex items-center gap-1.5">
-                    <Calendar className="w-4 h-4" /> {selectedPost.date}
-                  </div>
-                  
-                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm text-center space-y-4">
-                    <div className="w-14 h-14 bg-blue-50 rounded-full flex items-center justify-center mx-auto">
-                      <ExternalLink className="w-7 h-7 text-blue-500" />
-                    </div>
-                    <div>
-                      <p className="text-slate-800 text-[15px] sm:text-[16px] font-bold mb-1">
-                        안전한 브라우저 환경에서 원문을 제공합니다.
-                      </p>
-                      <p className="text-slate-500 text-[13px] sm:text-[14px] leading-relaxed">
-                        블로그 보안 정책 상 앱 내에서 본문이 직접 노출되지 않습니다.<br className="hidden sm:block"/>
-                        아래 버튼을 눌러 원문을 확인해주세요!
-                      </p>
-                    </div>
-                  </div>
+                  <button onClick={() => setSelectedPost(null)} className="p-2 rounded-full hover:bg-slate-100 text-slate-600 transition-colors">
+                    <X className="w-6 h-6" />
+                  </button>
                 </div>
               </div>
 
-              {/* 고정 이동 버튼 */}
-              <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30">
-                <button 
-                  onClick={() => window.open(selectedPost.link, '_blank')}
-                  className="w-full max-w-xl mx-auto py-4 bg-blue-600 text-white font-bold rounded-xl text-[16px] sm:text-[17px] flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/20 active:scale-[0.98]"
-                >
-                  <FileText className="w-5 h-5" />
-                  블로그 원문 읽으러 가기 <ArrowRight className="w-5 h-5 opacity-70" />
-                </button>
+              {/* 본문 영역 */}
+              <div className="flex-1 overflow-y-auto bg-white px-5 sm:px-8 py-8 pb-32">
+                <article className="max-w-2xl mx-auto">
+                  <div className="mb-8 space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                      {selectedPost.tags?.map((t, idx) => {
+                        const isObj = typeof t === 'object';
+                        const text = isObj ? t.text : t;
+                        const color = isObj ? t.color : (idx % 2 === 0 ? "bg-red-500" : "bg-blue-600");
+                        return <span key={isObj ? t.id : idx} className={`${color} text-white text-[11px] font-bold px-2.5 py-1 rounded-md shadow-sm`}>{text}</span>;
+                      })}
+                    </div>
+                    <h1 className="text-2xl sm:text-4xl font-extrabold text-slate-900 leading-snug tracking-tight break-keep">{selectedPost.title}</h1>
+                    <div className="flex items-center gap-2 text-sm text-slate-500 font-medium border-b border-slate-100 pb-6">
+                      <Calendar className="w-4 h-4" /> {selectedPost.date}
+                    </div>
+                  </div>
+
+                  {/* 썸네일 */}
+                  {selectedPost.thumbnail && (
+                    <SmartImage src={selectedPost.thumbnail} alt="Cover" className="w-full aspect-[4/3] sm:aspect-[21/9] object-cover rounded-2xl shadow-sm mb-10" />
+                  )}
+
+                  {/* 블록 렌더링 */}
+                  <div className="space-y-2">
+                    {selectedPost.blocks && selectedPost.blocks.length > 0 ? (
+                      selectedPost.blocks.map(block => <BlockViewer key={block.id} block={block} />)
+                    ) : (
+                      <div className="text-center py-20 text-slate-400">
+                        <FileText className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                        <p>작성된 본문 내용이 없습니다.</p>
+                        {selectedPost.link && <p className="text-sm mt-2">상단의 외부 링크 버튼을 통해 원문을 확인해주세요.</p>}
+                      </div>
+                    )}
+                  </div>
+                </article>
               </div>
-            </motion.div>
-          </>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -984,14 +1196,19 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
   const [showToast, setShowToast] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  
+  // 현재 에디터를 열어둔 게시글의 ID
+  const [editingPostId, setEditingPostId] = useState(null);
 
   useEffect(() => { setLocalConfig({ ...DEFAULT_CONFIG, ...config, faqs: config.faqs || DEFAULT_CONFIG.faqs, reviewImages: config.reviewImages || [], blogFolders: config.blogFolders || DEFAULT_CONFIG.blogFolders, blogTitle: config.blogTitle || DEFAULT_CONFIG.blogTitle, blogSubtitle: config.blogSubtitle || DEFAULT_CONFIG.blogSubtitle }); }, [config]);
 
-  // ID로 된 이미지를 Base64 URL로 변환하여 보여주기 위함
   const getImageUrl = (src) => {
     if (!src) return null;
-    if (src.startsWith('data:') || src.startsWith('http')) return src;
-    return images[src] || null;
+    if (src.startsWith('data:') || src.startsWith('http') || src.startsWith('blob:') || src.startsWith('chunked:')) return src;
+    const imgData = images[src];
+    if (!imgData) return null;
+    if (imgData.isChunked) return `chunked:${src}:${imgData.chunkCount}`;
+    return imgData;
   };
 
   const handlePriceChange = (product, date, value) => {
@@ -1002,17 +1219,119 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
   };
 
   const deleteImageFromDB = async (imageId) => {
-    if (imageId && !imageId.startsWith('data:') && !imageId.startsWith('http')) {
-      try { await deleteDoc(doc(db, getPath('images'), imageId)); } catch(e) {}
+    if (imageId && !imageId.startsWith('data:') && !imageId.startsWith('http') && !imageId.startsWith('chunked:')) {
+      try { 
+        const imgData = images[imageId];
+        if (imgData && imgData.isChunked) {
+          for(let i=0; i<imgData.chunkCount; i++) {
+             deleteDoc(doc(db, getPath('image_chunks'), `${imageId}_${i}`)).catch(()=>{});
+          }
+        }
+        await deleteDoc(doc(db, getPath('images'), imageId)); 
+      } catch(e) {}
     }
   };
 
+  // 범용 미디어 업로드 함수 (Base64 변환 후 Firestore 저장 -> 이미지/비디오 처리)
+  const uploadMediaToDB = (file, isVideo = false) => {
+    return new Promise((resolve, reject) => {
+      setIsUploading(true);
+      const reader = new FileReader();
+
+      reader.onload = async (event) => {
+        try {
+          let base64 = event.target.result;
+
+          if (!isVideo) {
+            // 이미지 압축 (고화질 유지)
+            const img = new Image();
+            img.src = base64;
+            await new Promise(r => { img.onload = r; });
+            
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 1600; 
+            const scaleSize = MAX_WIDTH / img.width;
+            if (scaleSize < 1) {
+              canvas.width = img.width * scaleSize;
+              canvas.height = img.height * scaleSize;
+            } else {
+              canvas.width = img.width;
+              canvas.height = img.height;
+            }
+            const ctx = canvas.getContext('2d');
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = "high";
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            base64 = canvas.toDataURL('image/jpeg', 0.95); 
+          }
+
+          // 🔥 문제 해결 핵심: Firestore 쓰기 한도 초과(resource-exhausted) 방지
+          // 청크 크기를 800KB로 키워 문서 수를 줄이고, 한꺼번에 전송하는 대신 약간의 시간차를 두고 순차적으로 안전하게 저장합니다.
+          const CHUNK_SIZE = 800000; 
+          
+          if (isVideo && base64.length * 0.75 > 40 * 1024 * 1024) {
+            setIsUploading(false);
+            alert("영상의 용량이 너무 큽니다 (최대 40MB 허용).\n긴 영상은 Youtube, Vimeo 등의 외부 URL 링크를 권장합니다.");
+            reject(new Error("File too large"));
+            return;
+          }
+
+          if (base64.length > CHUNK_SIZE) {
+            // 데이터를 분할
+            const chunks = [];
+            for (let i = 0; i < base64.length; i += CHUNK_SIZE) {
+              chunks.push(base64.substring(i, i + CHUNK_SIZE));
+            }
+            
+            const docRef = doc(collection(db, getPath('images')));
+            const mediaId = docRef.id;
+
+            // 1. 메타데이터 먼저 저장
+            await setDoc(docRef, { 
+              isChunked: true, 
+              chunkCount: chunks.length,
+              createdAt: Date.now() 
+            });
+            
+            // 2. 서버 과부하 방지를 위해 순차적 업로드 적용 (약간의 딜레이 추가)
+            for (let i = 0; i < chunks.length; i++) {
+              const chunkRef = doc(db, getPath('image_chunks'), `${mediaId}_${i}`);
+              await setDoc(chunkRef, { data: chunks[i] });
+              
+              // 브라우저 멈춤 및 DB 요청 폭주 방지
+              await new Promise(r => setTimeout(r, 60));
+            }
+
+            setIsUploading(false);
+            resolve(mediaId);
+          } else {
+            // 작은 파일은 분할 없이 바로 저장
+            const docRef = await addDoc(collection(db, getPath('images')), { base64, createdAt: Date.now() });
+            setIsUploading(false);
+            resolve(docRef.id);
+          }
+        } catch(err) {
+          console.error(err);
+          setIsUploading(false);
+          alert("업로드에 실패했습니다. (네트워크 오류 또는 용량 초과)");
+          reject(err);
+        }
+      };
+      
+      reader.onerror = () => {
+        setIsUploading(false);
+        reject(new Error("File reading failed"));
+      };
+
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // 기존 설정 이미지용 업로드 핸들러
   const handleImageUpload = async (e, type, folderId = null, postId = null) => {
     const file = e.target.files[0];
     if (!file) return;
-    setIsUploading(true);
 
-    // 기존 이미지가 있다면 덮어쓰기 위해 저장 공간 확보(삭제)
     let oldImageId = null;
     if (type === 'popup') oldImageId = localConfig.popupImage;
     if (type === 'priceTable') oldImageId = localConfig.priceTableImage;
@@ -1024,56 +1343,24 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
       }
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target.result;
-      img.onload = async () => {
-        const canvas = document.createElement('canvas');
-        // 변경 전: const MAX_WIDTH = type === 'priceTable' ? 1200 : type === 'review' ? 600 : type === 'blog' ? 400 : 800;
-        // 변경 후: 모든 이미지, 특히 블로그 이미지의 화질을 대폭 상향 (최소 1000px 유지)
-        const MAX_WIDTH = type === 'priceTable' ? 1600 : type === 'review' ? 1000 : type === 'blog' ? 1000 : 1200; 
-        const scaleSize = MAX_WIDTH / img.width;
-        canvas.width = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
-        canvas.height = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
-        const ctx = canvas.getContext('2d');
-        
-        // 부드러운 이미지 스케일링을 위해 옵션 추가
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = "high";
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        
-        // JPEG 압축률을 0.8에서 0.95로 상향하여 고화질 유지
-        const base64 = canvas.toDataURL('image/jpeg', 0.95); 
-        
-        try {
-          // Firestore의 images 컬렉션에 1장씩 분리 저장
-          const docRef = await addDoc(collection(db, getPath('images')), { base64, createdAt: Date.now() });
-          const imageId = docRef.id;
+    try {
+      const imageId = await uploadMediaToDB(file, false);
+      if (oldImageId) deleteImageFromDB(oldImageId);
 
-          if (oldImageId) deleteImageFromDB(oldImageId); // 이전 찌꺼기 이미지 삭제
-
-          if (type === 'slider') setLocalConfig(prev => ({ ...prev, sliderImages: [...prev.sliderImages, imageId] }));
-          else if (type === 'review') setLocalConfig(prev => ({ ...prev, reviewImages: [...prev.reviewImages, imageId] }));
-          else if (type === 'popup') setLocalConfig(prev => ({ ...prev, popupImage: imageId }));
-          else if (type === 'priceTable') setLocalConfig(prev => ({ ...prev, priceTableImage: imageId }));
-          else if (type === 'blog') {
-            setLocalConfig(prev => ({
-              ...prev,
-              blogFolders: prev.blogFolders.map(f => f.id === folderId ? { 
-                ...f, 
-                posts: f.posts.map(p => p.id === postId ? { ...p, thumbnail: imageId } : p) 
-              } : f)
-            }));
-          }
-        } catch(err) {
-          console.error(err);
-          alert("이미지 업로드에 실패했습니다. (권한 또는 용량 초과)");
-        }
-        setIsUploading(false);
-      };
-    };
-    reader.readAsDataURL(file);
+      if (type === 'slider') setLocalConfig(prev => ({ ...prev, sliderImages: [...prev.sliderImages, imageId] }));
+      else if (type === 'review') setLocalConfig(prev => ({ ...prev, reviewImages: [...prev.reviewImages, imageId] }));
+      else if (type === 'popup') setLocalConfig(prev => ({ ...prev, popupImage: imageId }));
+      else if (type === 'priceTable') setLocalConfig(prev => ({ ...prev, priceTableImage: imageId }));
+      else if (type === 'blog') {
+        setLocalConfig(prev => ({
+          ...prev,
+          blogFolders: prev.blogFolders.map(f => f.id === folderId ? { 
+            ...f, 
+            posts: f.posts.map(p => p.id === postId ? { ...p, thumbnail: imageId } : p) 
+          } : f)
+        }));
+      }
+    } catch(e) {}
   };
 
   const removeSliderImage = (index) => {
@@ -1116,7 +1403,7 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
   }
   
   const addBlogPost = (folderId) => {
-    const newPost = { id: `post_${Date.now()}`, title: "새로운 블로그 글", date: new Date().toLocaleDateString().replace(/\s/g, ''), tags: [], thumbnail: "", link: "" };
+    const newPost = { id: `post_${Date.now()}`, title: "새로운 블로그 글", date: new Date().toLocaleDateString().replace(/\s/g, ''), tags: [], thumbnail: "", link: "", blocks: [] };
     setLocalConfig(prev => ({ ...prev, blogFolders: prev.blogFolders.map(f => f.id === folderId ? { ...f, posts: [...f.posts, newPost] } : f) }));
   };
   const updateBlogPost = (folderId, postId, fields) => {
@@ -1130,6 +1417,76 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
     }
     setLocalConfig(prev => ({ ...prev, blogFolders: prev.blogFolders.map(f => f.id === folderId ? { ...f, posts: f.posts.filter(p => p.id !== postId) } : f) }));
   };
+
+  // --- Blog Block Editor Methods ---
+  const addBlock = (folderId, postId, type) => {
+    const newBlock = { id: `block_${Date.now()}`, type, content: '', url: '', urls: [], beforeUrl: '', afterUrl: '', caption: '', ratio: '4:5', align: 'left', icon: '💡', text: '', thumbnail: '' };
+    setLocalConfig(prev => ({
+      ...prev, blogFolders: prev.blogFolders.map(f => f.id === folderId ? {
+        ...f, posts: f.posts.map(p => p.id === postId ? { ...p, blocks: [...(p.blocks || []), newBlock] } : p)
+      } : f)
+    }));
+  };
+
+  const updateBlock = (folderId, postId, blockId, fields) => {
+    setLocalConfig(prev => ({
+      ...prev, blogFolders: prev.blogFolders.map(f => f.id === folderId ? {
+        ...f, posts: f.posts.map(p => p.id === postId ? {
+          ...p, blocks: p.blocks.map(b => b.id === blockId ? { ...b, ...fields } : b)
+        } : p)
+      } : f)
+    }));
+  };
+  
+  const appendFormat = (folderId, postId, block, format) => {
+    const newText = block.content + (format === 'bold' ? ' **굵게** ' : ' __밑줄__ ');
+    updateBlock(folderId, postId, block.id, { content: newText });
+  };
+
+  const removeBlock = (folderId, postId, blockId) => {
+    setLocalConfig(prev => ({
+      ...prev, blogFolders: prev.blogFolders.map(f => f.id === folderId ? {
+        ...f, posts: f.posts.map(p => p.id === postId ? {
+          ...p, blocks: p.blocks.filter(b => b.id !== blockId)
+        } : p)
+      } : f)
+    }));
+  };
+
+  const moveBlock = (folderId, postId, blockIndex, direction) => {
+    setLocalConfig(prev => ({
+      ...prev, blogFolders: prev.blogFolders.map(f => f.id === folderId ? {
+        ...f, posts: f.posts.map(p => {
+          if (p.id !== postId) return p;
+          const newBlocks = [...p.blocks];
+          if (direction === 'up' && blockIndex > 0) {
+            [newBlocks[blockIndex - 1], newBlocks[blockIndex]] = [newBlocks[blockIndex], newBlocks[blockIndex - 1]];
+          } else if (direction === 'down' && blockIndex < newBlocks.length - 1) {
+            [newBlocks[blockIndex + 1], newBlocks[blockIndex]] = [newBlocks[blockIndex], newBlocks[blockIndex + 1]];
+          }
+          return { ...p, blocks: newBlocks };
+        })
+      } : f)
+    }));
+  };
+
+  const handleBlockImageUpload = async (e, folderId, postId, blockId, field = 'url', isVideo = false) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const imageId = await uploadMediaToDB(file, isVideo);
+      if (field === 'urls') {
+        const folder = localConfig.blogFolders.find(f => f.id === folderId);
+        const post = folder?.posts.find(p => p.id === postId);
+        const block = post?.blocks.find(b => b.id === blockId);
+        const updatedUrls = [...(block.urls || []), imageId];
+        updateBlock(folderId, postId, blockId, { urls: updatedUrls });
+      } else {
+        updateBlock(folderId, postId, blockId, { [field]: imageId });
+      }
+    } catch(err) {}
+  };
+
 
   const saveSettings = async () => {
     setIsSaving(true);
@@ -1146,8 +1503,8 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
           <motion.div key="upload-loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[4000] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
             <div className="bg-white p-6 sm:p-8 rounded-2xl flex flex-col items-center shadow-2xl border border-slate-200">
               <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-3" />
-              <p className="font-bold text-slate-800">이미지 업로드 중...</p>
-              <p className="text-xs text-slate-500 mt-1">안전하게 저장소를 분리하여 무제한 보관합니다.</p>
+              <p className="font-bold text-slate-800">미디어 업로드 중...</p>
+              <p className="text-xs text-slate-500 mt-1">파일 크기에 따라 다소 시간이 소요될 수 있습니다.</p>
             </div>
           </motion.div>
         )}
@@ -1163,7 +1520,7 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
       {/* --- Blog Management Section --- */}
       <section className="bg-white p-5 sm:p-8 rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200">
         <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center justify-between mb-6 sm:mb-8">
-          <div className="flex items-center gap-2"><Folder className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" /> 블로그 모드 관리</div>
+          <div className="flex items-center gap-2"><Folder className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" /> 블로그 모드 및 인앱 에디터</div>
           <button onClick={addBlogFolder} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 font-bold rounded-lg text-sm hover:bg-slate-200 transition-colors">
             <Plus className="w-4 h-4" /> 카테고리(폴더) 추가
           </button>
@@ -1201,48 +1558,247 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
               </div>
 
               <div className="space-y-4">
-                {folder.posts.map((post, pIndex) => (
-                  <div key={post.id} className="bg-white p-4 sm:p-5 rounded-xl shadow-sm border border-slate-100 flex flex-col sm:flex-row gap-4 relative group">
-                    <button onClick={() => removeBlogPost(folder.id, post.id)} className="absolute top-3 right-3 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"><X className="w-4 h-4" /></button>
+                {folder.posts.map((post) => (
+                  <div key={post.id} className={`bg-white p-4 sm:p-5 rounded-xl shadow-sm border flex flex-col gap-4 relative transition-colors ${editingPostId === post.id ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-slate-200 hover:border-blue-300'}`}>
                     
-                    {/* Thumbnail Upload */}
-                    <div className="w-full sm:w-32 h-32 sm:h-32 bg-slate-100 rounded-lg flex-shrink-0 relative overflow-hidden border border-slate-200">
-                      {post.thumbnail && getImageUrl(post.thumbnail) ? (
-                        <>
-                          <img src={getImageUrl(post.thumbnail)} className="w-full h-full object-cover" alt="thumbnail" />
-                          <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white text-xs font-bold">
-                            변경<input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'blog', folder.id, post.id)} />
-                          </label>
-                        </>
-                      ) : (
-                        <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-colors">
-                          <ImagePlus className="w-6 h-6 mb-1" /><span className="text-[10px] font-bold">썸네일</span>
-                          <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'blog', folder.id, post.id)} />
-                        </label>
+                    <div className="flex justify-between items-start">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-5 h-5 text-blue-500" />
+                        <span className="font-bold text-slate-800">{post.title || "제목 없는 글"}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => setEditingPostId(editingPostId === post.id ? null : post.id)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${editingPostId === post.id ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                        >
+                          {editingPostId === post.id ? '에디터 닫기' : '블로그 작성 / 편집'}
+                        </button>
+                        <button onClick={() => removeBlogPost(folder.id, post.id)} className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    </div>
+
+                    {/* Editor Expanded Area */}
+                    <AnimatePresence>
+                      {editingPostId === post.id && (
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-t border-slate-100 pt-4 mt-2">
+                          <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                            {/* Thumbnail Upload */}
+                            <div className="w-full sm:w-32 h-32 sm:h-32 bg-slate-50 rounded-lg flex-shrink-0 relative overflow-hidden border border-slate-200 group">
+                              {post.thumbnail && getImageUrl(post.thumbnail) ? (
+                                <>
+                                  <SmartImage src={getImageUrl(post.thumbnail)} className="w-full h-full object-cover" alt="thumbnail" />
+                                  <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white text-xs font-bold">
+                                    변경<input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'blog', folder.id, post.id)} />
+                                  </label>
+                                </>
+                              ) : (
+                                <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-colors">
+                                  <ImagePlus className="w-6 h-6 mb-1" /><span className="text-[10px] font-bold">썸네일</span>
+                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'blog', folder.id, post.id)} />
+                                </label>
+                              )}
+                            </div>
+                            
+                            {/* Meta Inputs */}
+                            <div className="flex-1 flex flex-col gap-2.5">
+                              <div className="flex gap-2">
+                                <span className="text-xs font-bold text-slate-400 w-8 pt-2">제목</span>
+                                <input value={post.title} onChange={(e) => updateBlogPost(folder.id, post.id, { title: e.target.value })} className="flex-1 font-bold outline-none text-[14px] sm:text-[15px] border-b border-slate-200 focus:border-blue-500 pb-1 bg-transparent" placeholder="목록에 보일 글 제목" />
+                              </div>
+                              <div className="flex flex-col sm:flex-row gap-2.5">
+                                <div className="flex gap-2 flex-1">
+                                  <span className="text-xs font-bold text-slate-400 w-8 pt-2 whitespace-nowrap">외부링크</span>
+                                  <input value={post.link || ''} onChange={(e) => updateBlogPost(folder.id, post.id, { link: e.target.value })} className="flex-1 text-xs bg-slate-50 p-2 rounded outline-none border border-slate-200 focus:border-blue-500" placeholder="(선택) 외부 블로그 원문 링크" />
+                                </div>
+                                <div className="flex gap-2 sm:w-1/3">
+                                   <span className="text-xs font-bold text-slate-400 w-8 pt-2 sm:w-auto">날짜</span>
+                                   <input value={post.date} onChange={(e) => updateBlogPost(folder.id, post.id, { date: e.target.value })} className="flex-1 text-xs bg-slate-50 p-2 rounded outline-none border border-slate-200 focus:border-blue-500" placeholder="2026.01.23." />
+                                </div>
+                              </div>
+                              <div className="flex gap-2 items-start mt-1">
+                                 <span className="text-xs font-bold text-slate-400 w-8 pt-2.5">태그</span>
+                                 <TagEditor tags={post.tags} onChange={(newTags) => updateBlogPost(folder.id, post.id, { tags: newTags })} />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* --- In-App Block Editor --- */}
+                          <div className="bg-slate-50 rounded-xl p-4 sm:p-6 border border-slate-200">
+                            <h5 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><LayoutDashboard className="w-4 h-4 text-blue-500"/> 본문 블록 에디터</h5>
+                            
+                            {/* Blocks List */}
+                            <div className="space-y-4 mb-6">
+                              {(post.blocks || []).map((block, bIndex) => (
+                                <div key={block.id} className="relative group bg-white rounded-lg border border-slate-200 p-3 shadow-sm hover:border-blue-300 transition-colors">
+                                  {/* Block Controls */}
+                                  <div className="absolute -left-3 top-1/2 -translate-y-1/2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                    <button onClick={() => moveBlock(folder.id, post.id, bIndex, 'up')} className="p-1 bg-white border border-slate-200 rounded shadow-sm hover:bg-slate-50 text-slate-500"><ChevronUp className="w-3 h-3" /></button>
+                                    <button onClick={() => moveBlock(folder.id, post.id, bIndex, 'down')} className="p-1 bg-white border border-slate-200 rounded shadow-sm hover:bg-slate-50 text-slate-500"><ChevronDown className="w-3 h-3" /></button>
+                                  </div>
+                                  <button onClick={() => removeBlock(folder.id, post.id, block.id)} className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors z-10"><X className="w-4 h-4" /></button>
+                                  
+                                  {/* Block Inputs based on type */}
+                                  <div className="pr-8 pl-4">
+                                    <span className="text-[10px] font-bold text-white bg-slate-800 px-1.5 py-0.5 rounded uppercase tracking-wider absolute top-2 left-2">{block.type}</span>
+                                    
+                                    {(block.type === 'h1' || block.type === 'h2') && (
+                                      <div className="mt-4 flex flex-col gap-2">
+                                        <div className="flex gap-1 bg-slate-100 w-fit p-1 rounded-md">
+                                          <button onClick={() => updateBlock(folder.id, post.id, block.id, { align: 'left' })} className={`p-1 rounded ${block.align === 'left' ? 'bg-white shadow-sm' : 'text-slate-500'}`}><AlignLeft className="w-4 h-4" /></button>
+                                          <button onClick={() => updateBlock(folder.id, post.id, block.id, { align: 'center' })} className={`p-1 rounded ${block.align === 'center' ? 'bg-white shadow-sm' : 'text-slate-500'}`}><AlignCenter className="w-4 h-4" /></button>
+                                          <button onClick={() => updateBlock(folder.id, post.id, block.id, { align: 'right' })} className={`p-1 rounded ${block.align === 'right' ? 'bg-white shadow-sm' : 'text-slate-500'}`}><AlignRight className="w-4 h-4" /></button>
+                                        </div>
+                                        <input value={block.content} onChange={e => updateBlock(folder.id, post.id, block.id, { content: e.target.value })} className={`w-full ${block.type === 'h1' ? 'text-xl' : 'text-lg'} font-bold border-b border-transparent focus:border-blue-500 outline-none placeholder-slate-300 text-${block.align}`} placeholder={`제목 ${block.type === 'h1' ? '1' : '2'} 입력...`} />
+                                      </div>
+                                    )}
+                                    {(block.type === 'text' || block.type === 'ul' || block.type === 'ol') && (
+                                      <div className="mt-4 flex flex-col gap-2">
+                                        <div className="flex gap-2 items-center bg-slate-100 w-fit p-1 rounded-md">
+                                          <div className="flex gap-1 border-r border-slate-300 pr-1">
+                                            <button onClick={() => updateBlock(folder.id, post.id, block.id, { align: 'left' })} className={`p-1 rounded ${block.align === 'left' ? 'bg-white shadow-sm' : 'text-slate-500'}`}><AlignLeft className="w-4 h-4" /></button>
+                                            <button onClick={() => updateBlock(folder.id, post.id, block.id, { align: 'center' })} className={`p-1 rounded ${block.align === 'center' ? 'bg-white shadow-sm' : 'text-slate-500'}`}><AlignCenter className="w-4 h-4" /></button>
+                                            <button onClick={() => updateBlock(folder.id, post.id, block.id, { align: 'right' })} className={`p-1 rounded ${block.align === 'right' ? 'bg-white shadow-sm' : 'text-slate-500'}`}><AlignRight className="w-4 h-4" /></button>
+                                          </div>
+                                          <div className="flex gap-1 pl-1">
+                                            <button onClick={() => appendFormat(folder.id, post.id, block, 'bold')} className="p-1 rounded hover:bg-white text-slate-500" title="굵게 추가"><Bold className="w-4 h-4" /></button>
+                                            <button onClick={() => appendFormat(folder.id, post.id, block, 'underline')} className="p-1 rounded hover:bg-white text-slate-500" title="밑줄 추가"><Underline className="w-4 h-4" /></button>
+                                          </div>
+                                        </div>
+                                        <textarea value={block.content} onChange={e => updateBlock(folder.id, post.id, block.id, { content: e.target.value })} className={`w-full text-sm resize-y min-h-[60px] outline-none border-b border-transparent focus:border-blue-500 placeholder-slate-300 text-${block.align}`} placeholder={block.type === 'text' ? "본문 텍스트 입력..." : "목록 내용 입력... (엔터로 구분)"} />
+                                      </div>
+                                    )}
+                                    {block.type === 'quote' && (
+                                      <textarea value={block.content} onChange={e => updateBlock(folder.id, post.id, block.id, { content: e.target.value })} className="w-full text-sm font-medium italic border-l-4 border-slate-300 pl-3 py-1 outline-none resize-y min-h-[40px] mt-4 focus:border-blue-500 bg-slate-50" placeholder="인용구 입력..." />
+                                    )}
+                                    {block.type === 'callout' && (
+                                      <div className="mt-4 flex gap-2 items-start">
+                                        <input value={block.icon} onChange={e => updateBlock(folder.id, post.id, block.id, { icon: e.target.value })} className="w-10 text-center text-lg outline-none bg-slate-100 rounded-lg p-1" placeholder="💡" />
+                                        <textarea value={block.content} onChange={e => updateBlock(folder.id, post.id, block.id, { content: e.target.value })} className="flex-1 text-sm outline-none bg-slate-100 rounded-lg p-2 resize-y min-h-[40px]" placeholder="안내 문구 입력..." />
+                                      </div>
+                                    )}
+                                    {block.type === 'image' && (
+                                      <div className="mt-5 flex flex-col gap-3">
+                                        {block.url ? (
+                                          <div className="relative w-full max-w-sm rounded-lg overflow-hidden border border-slate-200">
+                                            <SmartImage src={getImageUrl(block.url)} className="w-full h-auto" />
+                                            <button onClick={() => updateBlock(folder.id, post.id, block.id, { url: '' })} className="absolute top-2 right-2 p-1.5 bg-black/50 text-white rounded"><Trash2 className="w-4 h-4" /></button>
+                                          </div>
+                                        ) : (
+                                          <label className="w-full max-w-sm h-32 border-2 border-dashed border-slate-300 flex flex-col items-center justify-center rounded-lg cursor-pointer hover:bg-blue-50 text-slate-500 hover:text-blue-500">
+                                            <ImagePlus className="w-6 h-6 mb-1" /><span className="text-xs font-bold">고화질 사진 업로드</span>
+                                            <input type="file" accept="image/*" className="hidden" onChange={e => handleBlockImageUpload(e, folder.id, post.id, block.id, 'url')} />
+                                          </label>
+                                        )}
+                                        <input value={block.caption || ''} onChange={e => updateBlock(folder.id, post.id, block.id, { caption: e.target.value })} className="text-xs w-full p-2 border border-slate-200 rounded outline-none text-center" placeholder="(선택) 이미지 캡션 입력" />
+                                      </div>
+                                    )}
+                                    {block.type === 'slider' && (
+                                      <div className="mt-5 flex flex-col gap-3">
+                                        <div className="flex gap-4 items-center">
+                                          <span className="text-xs font-bold text-slate-500">비율 설정:</span>
+                                          <label className="text-xs flex items-center gap-1 cursor-pointer"><input type="radio" checked={block.ratio === '4:5'} onChange={() => updateBlock(folder.id, post.id, block.id, { ratio: '4:5' })} /> 세로형 (4:5)</label>
+                                          <label className="text-xs flex items-center gap-1 cursor-pointer"><input type="radio" checked={block.ratio === '1:1'} onChange={() => updateBlock(folder.id, post.id, block.id, { ratio: '1:1' })} /> 정방형 (1:1)</label>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                          {(block.urls || []).map((u, i) => (
+                                            <div key={i} className={`relative w-20 ${block.ratio === '1:1' ? 'aspect-square' : 'aspect-[4/5]'} rounded overflow-hidden border border-slate-200`}>
+                                              <SmartImage src={getImageUrl(u)} className="w-full h-full object-cover" />
+                                              <button onClick={() => updateBlock(folder.id, post.id, block.id, { urls: block.urls.filter((_, idx) => idx !== i) })} className="absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 flex items-center justify-center text-white"><X className="w-4 h-4" /></button>
+                                            </div>
+                                          ))}
+                                          <label className={`w-20 ${block.ratio === '1:1' ? 'aspect-square' : 'aspect-[4/5]'} border-2 border-dashed border-slate-300 flex flex-col items-center justify-center rounded cursor-pointer hover:bg-blue-50 text-slate-400 hover:text-blue-500`}>
+                                            <Plus className="w-5 h-5" />
+                                            <input type="file" accept="image/*" className="hidden" onChange={e => handleBlockImageUpload(e, folder.id, post.id, block.id, 'urls')} />
+                                          </label>
+                                        </div>
+                                      </div>
+                                    )}
+                                    {block.type === 'video' && (
+                                      <div className="mt-5 flex flex-col gap-3">
+                                        <div className="flex gap-2">
+                                          <input value={block.url || ''} onChange={e => updateBlock(folder.id, post.id, block.id, { url: e.target.value })} className="flex-1 text-xs p-2 border border-slate-200 rounded outline-none" placeholder="Youtube, Vimeo 또는 MP4 URL 직접 입력 (권장)" />
+                                        </div>
+                                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                                          <span>또는 직접 영상 업로드 (최대 40MB):</span>
+                                          <label className="bg-slate-200 hover:bg-slate-300 px-3 py-1 rounded cursor-pointer font-bold transition-colors">
+                                            업로드 <input type="file" accept="video/*" className="hidden" onChange={e => handleBlockImageUpload(e, folder.id, post.id, block.id, 'url', true)} />
+                                          </label>
+                                        </div>
+                                        {block.url && (
+                                          <div className="mt-2 text-xs text-blue-500 font-bold">✓ 영상이 연동되었습니다. (자동재생, 음소거, 꽉찬 화면 적용됨)</div>
+                                        )}
+                                      </div>
+                                    )}
+                                    {block.type === 'beforeAfter' && (
+                                      <div className="mt-5 grid grid-cols-2 gap-4 max-w-sm">
+                                        <div className="flex flex-col gap-1">
+                                          <span className="text-[10px] font-bold text-slate-500">Before 사진</span>
+                                          {block.beforeUrl ? (
+                                            <div className="relative aspect-[4/5] rounded border border-slate-200 overflow-hidden"><SmartImage src={getImageUrl(block.beforeUrl)} className="w-full h-full object-cover" /><button onClick={() => updateBlock(folder.id, post.id, block.id, { beforeUrl: '' })} className="absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 flex items-center justify-center text-white"><X className="w-5 h-5"/></button></div>
+                                          ) : (
+                                            <label className="aspect-[4/5] border-2 border-dashed flex items-center justify-center cursor-pointer rounded hover:bg-slate-50"><Plus className="w-5 h-5 text-slate-400"/><input type="file" accept="image/*" className="hidden" onChange={e => handleBlockImageUpload(e, folder.id, post.id, block.id, 'beforeUrl')}/></label>
+                                          )}
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                          <span className="text-[10px] font-bold text-slate-500">After 사진</span>
+                                          {block.afterUrl ? (
+                                            <div className="relative aspect-[4/5] rounded border border-slate-200 overflow-hidden"><SmartImage src={getImageUrl(block.afterUrl)} className="w-full h-full object-cover" /><button onClick={() => updateBlock(folder.id, post.id, block.id, { afterUrl: '' })} className="absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 flex items-center justify-center text-white"><X className="w-5 h-5"/></button></div>
+                                          ) : (
+                                            <label className="aspect-[4/5] border-2 border-dashed flex items-center justify-center cursor-pointer rounded hover:bg-slate-50"><Plus className="w-5 h-5 text-slate-400"/><input type="file" accept="image/*" className="hidden" onChange={e => handleBlockImageUpload(e, folder.id, post.id, block.id, 'afterUrl')}/></label>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                    {block.type === 'link' && (
+                                      <div className="mt-4 flex flex-col gap-3">
+                                        <div className="flex gap-4">
+                                          <div className="w-20 h-20 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 flex-shrink-0">
+                                            {block.thumbnail ? (
+                                              <div className="relative w-full h-full group">
+                                                <SmartImage src={getImageUrl(block.thumbnail)} className="w-full h-full object-cover" />
+                                                <button onClick={() => updateBlock(folder.id, post.id, block.id, { thumbnail: '' })} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white"><X className="w-4 h-4"/></button>
+                                              </div>
+                                            ) : (
+                                              <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-blue-50 text-slate-400 hover:text-blue-500">
+                                                <ImagePlus className="w-5 h-5 mb-1" /><span className="text-[10px] font-bold">1:1 썸네일</span>
+                                                <input type="file" accept="image/*" className="hidden" onChange={e => handleBlockImageUpload(e, folder.id, post.id, block.id, 'thumbnail')} />
+                                              </label>
+                                            )}
+                                          </div>
+                                          <div className="flex-1 flex flex-col gap-2 justify-center">
+                                            <input value={block.text || ''} onChange={e => updateBlock(folder.id, post.id, block.id, { text: e.target.value })} className="text-sm p-2 border border-slate-200 rounded outline-none" placeholder="표시될 링크 텍스트 (예: 예약 바로가기)" />
+                                            <input value={block.url || ''} onChange={e => updateBlock(folder.id, post.id, block.id, { url: e.target.value })} className="text-xs p-2 bg-slate-100 rounded outline-none" placeholder="https://..." />
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                  </div>
+                                </div>
+                              ))}
+                              {(!post.blocks || post.blocks.length === 0) && <div className="text-center py-6 text-slate-400 text-sm border-2 border-dashed rounded-xl">블록을 추가하여 내용을 작성해보세요.</div>}
+                            </div>
+
+                            {/* Add Block Menu */}
+                            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 border-t border-slate-200 pt-4">
+                              <button onClick={() => addBlock(folder.id, post.id, 'h1')} className="py-2 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-600"><Type className="w-4 h-4 mb-1" /><span className="text-[10px] font-bold">제목 1</span></button>
+                              <button onClick={() => addBlock(folder.id, post.id, 'h2')} className="py-2 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-600"><Type className="w-4 h-4 mb-1 opacity-70" /><span className="text-[10px] font-bold">제목 2</span></button>
+                              <button onClick={() => addBlock(folder.id, post.id, 'text')} className="py-2 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-600"><AlignLeft className="w-4 h-4 mb-1" /><span className="text-[10px] font-bold">텍스트</span></button>
+                              <button onClick={() => addBlock(folder.id, post.id, 'ul')} className="py-2 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-600"><List className="w-4 h-4 mb-1" /><span className="text-[10px] font-bold">글머리기호</span></button>
+                              <button onClick={() => addBlock(folder.id, post.id, 'ol')} className="py-2 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-600"><ListOrdered className="w-4 h-4 mb-1" /><span className="text-[10px] font-bold">번호매기기</span></button>
+                              <button onClick={() => addBlock(folder.id, post.id, 'quote')} className="py-2 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-600"><Quote className="w-4 h-4 mb-1" /><span className="text-[10px] font-bold">인용구</span></button>
+                              
+                              <button onClick={() => addBlock(folder.id, post.id, 'image')} className="py-2 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-600"><ImagePlus className="w-4 h-4 mb-1" /><span className="text-[10px] font-bold">사진</span></button>
+                              <button onClick={() => addBlock(folder.id, post.id, 'slider')} className="py-2 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-600"><Columns className="w-4 h-4 mb-1" /><span className="text-[10px] font-bold">슬라이드</span></button>
+                              <button onClick={() => addBlock(folder.id, post.id, 'video')} className="py-2 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-600"><MonitorPlay className="w-4 h-4 mb-1" /><span className="text-[10px] font-bold">영상</span></button>
+                              <button onClick={() => addBlock(folder.id, post.id, 'beforeAfter')} className="py-2 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-600"><Maximize className="w-4 h-4 mb-1" /><span className="text-[10px] font-bold">Bef/Aft</span></button>
+                              <button onClick={() => addBlock(folder.id, post.id, 'callout')} className="py-2 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-600"><span className="text-sm mb-1 h-4 flex items-center justify-center">💡</span><span className="text-[10px] font-bold">콜아웃</span></button>
+                              <button onClick={() => addBlock(folder.id, post.id, 'link')} className="py-2 flex flex-col items-center justify-center bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors text-slate-600"><Link2 className="w-4 h-4 mb-1" /><span className="text-[10px] font-bold">링크</span></button>
+                            </div>
+                          </div>
+                        </motion.div>
                       )}
-                    </div>
-                    
-                    {/* Content Inputs */}
-                    <div className="flex-1 flex flex-col gap-2.5">
-                      <div className="flex gap-2 pr-6">
-                        <span className="text-xs font-bold text-slate-400 w-8 pt-2">제목</span>
-                        <input value={post.title} onChange={(e) => updateBlogPost(folder.id, post.id, { title: e.target.value })} className="flex-1 font-bold outline-none text-[14px] sm:text-[15px] border-b border-transparent focus:border-blue-500 pb-1" placeholder="글 제목 입력" />
-                      </div>
-                      <div className="flex flex-col sm:flex-row gap-2.5">
-                        <div className="flex gap-2 flex-1">
-                          <span className="text-xs font-bold text-slate-400 w-8 pt-2">링크</span>
-                          <input value={post.link} onChange={(e) => updateBlogPost(folder.id, post.id, { link: e.target.value })} className="flex-1 text-xs bg-slate-50 p-2 rounded outline-none border border-slate-200 focus:border-blue-500" placeholder="https://blog.naver.com/..." />
-                        </div>
-                        <div className="flex gap-2 sm:w-1/3">
-                           <span className="text-xs font-bold text-slate-400 w-8 pt-2 sm:w-auto">날짜</span>
-                           <input value={post.date} onChange={(e) => updateBlogPost(folder.id, post.id, { date: e.target.value })} className="flex-1 text-xs bg-slate-50 p-2 rounded outline-none border border-slate-200 focus:border-blue-500" placeholder="2026.01.23." />
-                        </div>
-                      </div>
-                      <div className="flex gap-2 items-start mt-1">
-                         <span className="text-xs font-bold text-slate-400 w-8 pt-2.5">태그</span>
-                         <TagEditor tags={post.tags} onChange={(newTags) => updateBlogPost(folder.id, post.id, { tags: newTags })} />
-                      </div>
-                    </div>
+                    </AnimatePresence>
                   </div>
                 ))}
                 <button onClick={() => addBlogPost(folder.id)} className="w-full py-3 sm:py-4 border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl text-slate-500 font-bold hover:text-blue-600 hover:bg-blue-50 transition-colors text-sm flex items-center justify-center gap-2">
@@ -1264,7 +1820,7 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
               {localConfig.sliderImages.map((img, idx) => (
                 <div key={`admin-slide-${idx}`} className="relative aspect-square rounded-xl sm:rounded-2xl overflow-hidden border border-slate-200 group bg-slate-50">
-                  <img src={getImageUrl(img)} alt={`Slide ${idx}`} className="w-full h-full object-cover" />
+                  <SmartImage src={getImageUrl(img)} alt={`Slide ${idx}`} className="w-full h-full object-cover" />
                   <button onClick={() => removeSliderImage(idx)} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-6 h-6 sm:w-8 sm:h-8 text-white" /></button>
                 </div>
               ))}
@@ -1282,7 +1838,7 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
               {localConfig.reviewImages.map((img, idx) => (
                 <div key={`admin-review-${idx}`} className="relative aspect-[3/4] rounded-xl sm:rounded-2xl overflow-hidden border border-slate-200 group bg-slate-50">
-                  <img src={getImageUrl(img)} alt={`Review ${idx}`} className="w-full h-full object-cover" />
+                  <SmartImage src={getImageUrl(img)} alt={`Review ${idx}`} className="w-full h-full object-cover" />
                   <button onClick={() => removeReviewImage(idx)} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-6 h-6 sm:w-8 sm:h-8 text-white" /></button>
                 </div>
               ))}
@@ -1297,9 +1853,9 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
           <div className="grid md:grid-cols-2 gap-6 sm:gap-8">
             <div className="bg-slate-50 p-5 sm:p-6 rounded-2xl border border-slate-100">
               <label className="block text-[14px] sm:text-sm font-bold text-slate-800 mb-3 sm:mb-4">안내 팝업용 사진 (동그랗게 표시됨)</label>
-              {localConfig.popupImage && getImageUrl(localConfig.popupImage) ? (
+              {localConfig.popupImage ? (
                 <div className="relative w-24 h-24 sm:w-32 sm:h-32 rounded-full overflow-hidden border border-slate-200 group bg-white shadow-sm mb-3 sm:mb-4">
-                  <img src={getImageUrl(localConfig.popupImage)} alt="Popup" className="w-full h-full object-cover" />
+                  <SmartImage src={getImageUrl(localConfig.popupImage)} alt="Popup" className="w-full h-full object-cover" />
                   <button onClick={() => { deleteImageFromDB(localConfig.popupImage); setLocalConfig({...localConfig, popupImage: null}); }} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-5 h-5 sm:w-6 sm:h-6 text-white" /></button>
                 </div>
               ) : (
@@ -1309,9 +1865,9 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
             </div>
             <div className="bg-slate-50 p-5 sm:p-6 rounded-2xl border border-slate-100">
               <label className="block text-[14px] sm:text-sm font-bold text-slate-800 mb-3 sm:mb-4">하단 상품 가격표 이미지 <span className="text-blue-500 font-normal">(원본비율 적용)</span></label>
-              {localConfig.priceTableImage && getImageUrl(localConfig.priceTableImage) ? (
+              {localConfig.priceTableImage ? (
                 <div className="relative rounded-xl overflow-hidden border border-slate-200 group bg-white shadow-sm mb-3 sm:mb-4 max-w-xs">
-                  <img src={getImageUrl(localConfig.priceTableImage)} alt="Price Table" className="w-full h-auto object-contain" />
+                  <SmartImage src={getImageUrl(localConfig.priceTableImage)} alt="Price Table" className="w-full h-auto object-contain" />
                   <button onClick={() => { deleteImageFromDB(localConfig.priceTableImage); setLocalConfig({...localConfig, priceTableImage: null}); }} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-6 h-6 sm:w-8 sm:h-8 text-white" /></button>
                 </div>
               ) : (
@@ -1764,7 +2320,12 @@ function MainApp() {
       unsubImages = onSnapshot(collection(db, getPath('images')), (snap) => {
         const newImages = {};
         snap.forEach(doc => {
-          newImages[doc.id] = doc.data().base64;
+          const data = doc.data();
+          if (data.isChunked) {
+             newImages[doc.id] = { isChunked: true, chunkCount: data.chunkCount };
+          } else {
+             newImages[doc.id] = data.base64;
+          }
         });
         setImages(newImages);
       }, err => console.error("Images fetch error:", err));
@@ -1798,11 +2359,19 @@ function MainApp() {
   // config 내부의 이미지 id를 실제 이미지 데이터(base64)로 변환
   const getImageUrl = useCallback((src) => {
     if (!src) return null;
-    if (src.startsWith('data:') || src.startsWith('http')) return src;
-    return images[src] || null; // src 반환 안함. 못찾으면 null 반환 (로딩중이거나 삭제됨)
+    if (src.startsWith('data:') || src.startsWith('http') || src.startsWith('blob:') || src.startsWith('chunked:')) return src;
+    
+    const imgData = images[src];
+    if (!imgData) return null;
+    
+    if (imgData.isChunked) {
+      return `chunked:${src}:${imgData.chunkCount}`;
+    }
+    
+    return imgData; 
   }, [images]);
 
-  // 화면 렌더링용 (config 문서에서 아이디만 가져와서 실제 데이터 주입)
+  // 화면 렌더링용 (config 문서에서 아이디만 가져와서 실제 데이터 주입 + 중첩된 블록 이미지도 변환 처리)
   const processedConfig = useMemo(() => {
     const safeConfig = { 
       ...DEFAULT_CONFIG, 
@@ -1823,7 +2392,15 @@ function MainApp() {
         ...folder,
         posts: folder.posts.map(post => ({
           ...post,
-          thumbnail: getImageUrl(post.thumbnail)
+          thumbnail: getImageUrl(post.thumbnail),
+          blocks: (post.blocks || []).map(b => {
+             if (b.type === 'image') return { ...b, url: getImageUrl(b.url) };
+             if (b.type === 'slider') return { ...b, urls: (b.urls || []).map(getImageUrl) };
+             if (b.type === 'beforeAfter') return { ...b, beforeUrl: getImageUrl(b.beforeUrl), afterUrl: getImageUrl(b.afterUrl) };
+             if (b.type === 'video' && b.url && !b.url.startsWith('http')) return { ...b, url: getImageUrl(b.url) };
+             if (b.type === 'link') return { ...b, thumbnail: getImageUrl(b.thumbnail) };
+             return b;
+          })
         }))
       }))
     };
