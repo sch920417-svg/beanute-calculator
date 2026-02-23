@@ -168,9 +168,7 @@ const ModeToggle = ({ isBlogMode, onToggle }) => (
   </div>
 );
 
-// 태그 커스텀 관리 에디터 컴포넌트
 function TagEditor({ tags, onChange }) {
-  // 구버전(문자열 리스트)을 객체 형태로 변환
   const normalizedTags = tags.map(t => typeof t === 'string' ? { id: Math.random().toString(36).substr(2, 9), text: t, color: TAG_COLORS[0] } : t);
   
   const [newTagText, setNewTagText] = useState("");
@@ -225,7 +223,8 @@ function TagEditor({ tags, onChange }) {
 // --- Views ---
 
 // 1. Calculator View (User Facing)
-function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlogMode }) {
+// isClientMode Props를 추가로 전달받아 통계 기록 시 관리자화면인지 확인합니다.
+function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlogMode, isClientMode = false }) {
   const safeConfig = { 
     ...DEFAULT_CONFIG, 
     ...config, 
@@ -246,24 +245,22 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
   const [activeSlide, setActiveSlide] = useState(0);
   const [hasTracked, setHasTracked] = useState(false);
 
-  // Sidebar State
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeSection, setActiveSection] = useState("");
-  const [sidebarExpandedFolders, setSidebarExpandedFolders] = useState(new Set()); // 사이드바용 폴더 토글
+  const [sidebarExpandedFolders, setSidebarExpandedFolders] = useState(new Set()); 
 
-  // Review Slider & Lightbox State
   const [activeReviewSlide, setActiveReviewSlide] = useState(0);
   const [lightboxIndex, setLightboxIndex] = useState(null);
 
-  // FAQ State
   const [openFaq, setOpenFaq] = useState(null);
 
-  // Blog State (Main View)
   const [expandedFolders, setExpandedFolders] = useState(new Set(safeConfig.blogFolders.length > 0 ? [safeConfig.blogFolders[0].id] : []));
   const [selectedPost, setSelectedPost] = useState(null);
 
   useEffect(() => {
     const logVisit = async () => {
+      // 🚨 관리자 화면(미리보기)일 경우 방문 통계 기록 생략!
+      if (!isClientMode) return;
       if (!auth || !auth.currentUser) return;
       try {
         let region = "알 수 없음";
@@ -276,7 +273,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
       } catch (e) { console.error("Visit log error", e); }
     };
     logVisit();
-  }, []);
+  }, [isClientMode]);
 
   useEffect(() => {
     if (!safeConfig.sliderImages || safeConfig.sliderImages.length === 0) return;
@@ -880,7 +877,6 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
               className="fixed bottom-0 left-0 right-0 h-[92vh] sm:h-[85vh] max-w-3xl mx-auto bg-white rounded-t-[2rem] z-[2010] shadow-2xl overflow-hidden flex flex-col"
             >
-              {/* 개선된 손잡이 및 닫기 버튼 영역 */}
               <div className="pt-4 sm:pt-5 pb-3 flex items-center justify-center relative bg-white z-20">
                 <div className="w-12 h-1.5 bg-slate-200 hover:bg-slate-300 transition-colors rounded-full cursor-grab active:cursor-grabbing" onClick={() => setSelectedPost(null)} />
               </div>
@@ -1042,14 +1038,14 @@ function AdminSettingsView({ config, onSaveConfig }) {
         <div className="mb-8 p-4 sm:p-6 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
           <h4 className="font-bold text-slate-700 text-sm">블로그 메인 화면 문구 설정</h4>
           <div className="space-y-3">
-             <div>
-               <label className="text-xs text-slate-500 font-bold mb-1 block">메인 타이틀</label>
-               <input value={localConfig.blogTitle} onChange={e => setLocalConfig({...localConfig, blogTitle: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold" placeholder="Vignette Journal" />
-             </div>
-             <div>
-               <label className="text-xs text-slate-500 font-bold mb-1 block">서브 타이틀</label>
-               <input value={localConfig.blogSubtitle} onChange={e => setLocalConfig({...localConfig, blogSubtitle: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 text-sm" placeholder="비뉴뜨만의 따뜻한 촬영 기록과 정보를 만나보세요." />
-             </div>
+            <div>
+              <label className="text-xs text-slate-500 font-bold mb-1 block">메인 타이틀</label>
+              <input value={localConfig.blogTitle} onChange={e => setLocalConfig({...localConfig, blogTitle: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold" placeholder="Vignette Journal" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 font-bold mb-1 block">서브 타이틀</label>
+              <input value={localConfig.blogSubtitle} onChange={e => setLocalConfig({...localConfig, blogSubtitle: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 text-sm" placeholder="비뉴뜨만의 따뜻한 촬영 기록과 정보를 만나보세요." />
+            </div>
           </div>
         </div>
 
@@ -1642,6 +1638,8 @@ function MainApp() {
   };
 
   const trackEstimateToDB = async (data) => {
+    // 🚨 관리자 화면의 미리보기에서 발생한 견적 계산 통계 집계 제외
+    if (!isClientMode) return;
     if (!db || !user) return;
     try { await addDoc(collection(db, getPath('estimates')), data); } 
     catch (e) { console.error("Track estimate error:", e); }
@@ -1656,8 +1654,8 @@ function MainApp() {
     );
   }
 
-  // 고객용 뷰 (클라이언트 모드)
-  if (isClientMode) return <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} isBlogMode={isBlogMode} setBlogMode={setBlogMode} />;
+  // 고객용 뷰 (클라이언트 모드) - isClientMode 속성 전달
+  if (isClientMode) return <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} isBlogMode={isBlogMode} setBlogMode={setBlogMode} isClientMode={isClientMode} />;
 
   // 관리자 모드 접속 시, 로그인 확인
   if (!isAdminAuthenticated) {
@@ -1715,7 +1713,8 @@ function MainApp() {
         <AnimatePresence mode="wait">
           {activeTab === "preview" && (
             <motion.div key="preview" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
-              <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} isBlogMode={isBlogMode} setBlogMode={setBlogMode} />
+              {/* 관리자 모드의 미리보기에서는 isClientMode=false가 전달됨 */}
+              <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} isBlogMode={isBlogMode} setBlogMode={setBlogMode} isClientMode={isClientMode} />
             </motion.div>
           )}
           {activeTab === "settings" && (
