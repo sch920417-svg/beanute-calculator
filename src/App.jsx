@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Camera, Calendar, Users, Calculator, ArrowRight, ChevronDown, X, 
   Settings, LayoutDashboard, ImagePlus, Trash2, Save, UploadCloud,
   Type, MessageSquare, ToggleLeft, ToggleRight, BarChart3, TrendingUp,
-  Link as LinkIcon, ExternalLink, MapPin, CheckCircle, Loader2, Star, HelpCircle, ChevronUp, Plus, ChevronLeft, ChevronRight, Lock, Menu
+  Link as LinkIcon, ExternalLink, MapPin, CheckCircle, Loader2, Star, HelpCircle, ChevronUp, Plus, ChevronLeft, ChevronRight, Lock, Menu, Folder, FileText
 } from "lucide-react";
 
 // --- Firebase Imports ---
@@ -12,10 +12,9 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc } from 'firebase/firestore';
 
-// --- Firebase Initialization (중복 실행 방지 및 환경설정 완료) ---
+// --- Firebase Initialization ---
 let app, auth, db;
 try {
-  // Canvas 환경에서 주입하는 설정이 있으면 우선 사용하고, 없으면 제공된 기본값 사용
   const firebaseConfig = typeof __firebase_config !== 'undefined' 
     ? JSON.parse(__firebase_config) 
     : {
@@ -27,7 +26,6 @@ try {
         appId: "1:992976775409:web:4b3541b364705e49b5e150"
       };
   
-  // 저장할 때마다 파이어베이스가 중복으로 켜지는 것을 방지
   app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
   auth = getAuth(app);
   db = getFirestore(app);
@@ -36,12 +34,9 @@ try {
 }
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'family-photo-app';
-const getPath = (colName) => {
-  // Canvas Firestore 규칙에 맞게 경로 강제 할당
-  return `artifacts/${appId}/public/data/${colName}`; 
-};
+const getPath = (colName) => `artifacts/${appId}/public/data/${colName}`; 
 
-// --- Constants (Keys) ---
+// --- Constants ---
 const PRODUCT_TYPES = { FAMILY: "family", MATERNITY: "maternity", COUPLE: "couple" };
 const DATE_TYPES = { WEEKDAY: "weekday", WEEKEND: "weekend" };
 
@@ -53,6 +48,12 @@ const FRAME_SIZES = [
   { id: '20R', label: '20R', cm: '약 50x61 cm' },
   { id: '24R', label: '24R', cm: '약 61x86 cm' },
   { id: '30R', label: '30R', cm: '약 76x102 cm' },
+];
+
+const TAG_COLORS = [
+  "bg-red-500", "bg-orange-500", "bg-amber-500", "bg-green-500", 
+  "bg-emerald-500", "bg-teal-500", "bg-cyan-500", "bg-blue-500", 
+  "bg-indigo-500", "bg-violet-500", "bg-purple-500", "bg-pink-500", "bg-slate-800"
 ];
 
 const DEFAULT_CONFIG = {
@@ -71,6 +72,24 @@ const DEFAULT_CONFIG = {
     { question: "예약금은 얼마인가요?", answer: "예약금은 5만원이며, 촬영 당일 총 결제 금액에서 제외됩니다." },
     { question: "의상 대여가 가능한가요?", answer: "네, 스튜디오에 다양한 사이즈의 드레스와 정장, 구두가 준비되어 있습니다.\n무료로 대여 가능합니다." },
     { question: "원본 사진은 전부 제공되나요?", answer: "네! 촬영된 원본 사진은 색감 보정 후 모두 고화질로 제공해드리고 있습니다." }
+  ],
+  blogTitle: "Vignette Journal",
+  blogSubtitle: "비뉴뜨만의 따뜻한 촬영 기록과 정보를 만나보세요.",
+  blogFolders: [
+    {
+      id: "folder_1",
+      title: "인원별 구성",
+      posts: [
+        {
+          id: "post_1",
+          title: "[추가금은 0원, 만족도는 1000%] 정직한 부산 가족사진 비뉴뜨 스튜디오 촬영 안내 + 가격",
+          date: "2026.01.23.",
+          tags: [{ id: "tag1", text: "블로그", color: "bg-red-500" }, { id: "tag2", text: "필독", color: "bg-blue-500" }],
+          thumbnail: "",
+          link: "https://m.blog.naver.com"
+        }
+      ]
+    }
   ],
   popupImage: null,
   priceTableImage: null,
@@ -95,7 +114,7 @@ function SelectCustom({ value, onChange, options, label, disabled, className }) 
             onChange(options.some(o => typeof o.value === "number") ? Number(val) : val);
           }}
           disabled={disabled}
-          className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3.5 pr-10 text-[15px] sm:text-base shadow-sm transition-all focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50 hover:border-blue-500/50"
+          className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3.5 pr-10 text-[15px] sm:text-base shadow-sm transition-all focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50 hover:border-blue-500/50 text-slate-800"
         >
           {options.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
         </select>
@@ -124,11 +143,98 @@ function RadioCard({ selected, onClick, title, description, disabled }) {
   );
 }
 
+const BouncyTag = ({ text, colorClass = "bg-red-500" }) => (
+  <motion.span 
+    initial={{ scale: 0.8, opacity: 0 }}
+    animate={{ scale: 1, opacity: 1 }}
+    whileHover={{ scale: 1.15, y: -2 }}
+    transition={{ type: "spring", stiffness: 500, damping: 15 }}
+    className={`${colorClass} text-white text-[10px] sm:text-xs font-bold px-2.5 py-0.5 rounded-full shadow-sm cursor-default whitespace-nowrap`}
+  >
+    {text}
+  </motion.span>
+);
+
+const ModeToggle = ({ isBlogMode, onToggle }) => (
+  <div className="relative bg-slate-200/50 dark:bg-slate-800 p-1 rounded-full flex items-center w-[160px] sm:w-[180px] cursor-pointer shadow-inner overflow-hidden border border-slate-200/50" onClick={onToggle}>
+    <motion.div 
+      className={`absolute top-1 bottom-1 rounded-full shadow-md z-0 ${isBlogMode ? 'bg-slate-700' : 'bg-white'}`}
+      animate={{ x: isBlogMode ? '90%' : '0%' }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      style={{ width: '50%' }}
+    />
+    <div className={`flex-1 text-center z-10 text-[12px] sm:text-[13px] font-bold transition-colors ${!isBlogMode ? 'text-slate-900' : 'text-slate-400'}`}>계산기 모드</div>
+    <div className={`flex-1 text-center z-10 text-[12px] sm:text-[13px] font-bold transition-colors ${isBlogMode ? 'text-white' : 'text-slate-500'}`}>블로그 모드</div>
+  </div>
+);
+
+// 태그 커스텀 관리 에디터 컴포넌트
+function TagEditor({ tags, onChange }) {
+  // 구버전(문자열 리스트)을 객체 형태로 변환
+  const normalizedTags = tags.map(t => typeof t === 'string' ? { id: Math.random().toString(36).substr(2, 9), text: t, color: TAG_COLORS[0] } : t);
+  
+  const [newTagText, setNewTagText] = useState("");
+  const [selectedColor, setSelectedColor] = useState(TAG_COLORS[0]);
+
+  const handleAdd = () => {
+    if (!newTagText.trim()) return;
+    onChange([...normalizedTags, { id: Math.random().toString(36).substr(2, 9), text: newTagText.trim(), color: selectedColor }]);
+    setNewTagText("");
+  };
+
+  const handleRemove = (id) => {
+    onChange(normalizedTags.filter(t => t.id !== id));
+  };
+
+  return (
+    <div className="flex flex-col gap-2 p-3 sm:p-4 bg-slate-50 border border-slate-200 rounded-xl w-full">
+      <div className="flex flex-wrap gap-1.5 mb-1">
+        {normalizedTags.map(t => (
+          <span key={t.id} className={`${t.color} text-white text-[11.5px] font-bold px-2 py-1 rounded-full flex items-center gap-1 shadow-sm`}>
+            {t.text}
+            <button onClick={() => handleRemove(t.id)} className="hover:bg-white/30 rounded-full p-0.5 transition-colors"><X className="w-3 h-3" /></button>
+          </span>
+        ))}
+        {normalizedTags.length === 0 && <span className="text-[11px] text-slate-400 font-medium py-1">추가된 태그가 없습니다.</span>}
+      </div>
+      
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-white p-2 rounded-lg border border-slate-200">
+        <input 
+          value={newTagText} 
+          onChange={e => setNewTagText(e.target.value)} 
+          placeholder="태그명 입력" 
+          className="text-xs p-1.5 bg-transparent outline-none flex-1 font-bold min-w-[80px]" 
+        />
+        <div className="flex items-center gap-1 flex-wrap sm:border-l border-slate-100 sm:pl-3">
+          {TAG_COLORS.slice(0, 9).map(c => (
+            <button 
+              key={c} 
+              onClick={() => setSelectedColor(c)} 
+              className={`w-4 h-4 rounded-full ${c} border-2 ${selectedColor === c ? 'border-slate-800 scale-125 shadow-md' : 'border-transparent opacity-60 hover:opacity-100'} transition-all`} 
+            />
+          ))}
+        </div>
+        <button onClick={handleAdd} className="bg-slate-800 text-white text-[11px] px-3 py-1.5 rounded-md font-bold hover:bg-slate-700 transition-colors whitespace-nowrap w-full sm:w-auto">
+          추가
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // --- Views ---
 
 // 1. Calculator View (User Facing)
-function CalculatorView({ config, onEstimateComplete, visits }) {
-  const safeConfig = { ...DEFAULT_CONFIG, ...config, faqs: config.faqs || DEFAULT_CONFIG.faqs, reviewImages: config.reviewImages || [] };
+function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlogMode }) {
+  const safeConfig = { 
+    ...DEFAULT_CONFIG, 
+    ...config, 
+    faqs: config.faqs || DEFAULT_CONFIG.faqs, 
+    reviewImages: config.reviewImages || [],
+    blogFolders: config.blogFolders || DEFAULT_CONFIG.blogFolders,
+    blogTitle: config.blogTitle || DEFAULT_CONFIG.blogTitle,
+    blogSubtitle: config.blogSubtitle || DEFAULT_CONFIG.blogSubtitle,
+  };
   
   const [productType, setProductType] = useState(PRODUCT_TYPES.FAMILY);
   const [dateType, setDateType] = useState(DATE_TYPES.WEEKDAY);
@@ -143,6 +249,7 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
   // Sidebar State
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeSection, setActiveSection] = useState("");
+  const [sidebarExpandedFolders, setSidebarExpandedFolders] = useState(new Set()); // 사이드바용 폴더 토글
 
   // Review Slider & Lightbox State
   const [activeReviewSlide, setActiveReviewSlide] = useState(0);
@@ -151,10 +258,12 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
   // FAQ State
   const [openFaq, setOpenFaq] = useState(null);
 
-  // Visit Tracking
+  // Blog State (Main View)
+  const [expandedFolders, setExpandedFolders] = useState(new Set(safeConfig.blogFolders.length > 0 ? [safeConfig.blogFolders[0].id] : []));
+  const [selectedPost, setSelectedPost] = useState(null);
+
   useEffect(() => {
     const logVisit = async () => {
-      // 보안 룰 검증을 위한 현재 사용자 체크
       if (!auth || !auth.currentUser) return;
       try {
         let region = "알 수 없음";
@@ -169,7 +278,6 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
     logVisit();
   }, []);
 
-  // Main Slider Timer
   useEffect(() => {
     if (!safeConfig.sliderImages || safeConfig.sliderImages.length === 0) return;
     const timer = setInterval(() => setActiveSlide((prev) => (prev + 1) % safeConfig.sliderImages.length), 3500);
@@ -178,15 +286,11 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
 
   useEffect(() => setIsPopupOpen(safeConfig.popupEnabled), [safeConfig.popupEnabled]);
 
-  // Section Observer for Sidebar Active State
   useEffect(() => {
+    if (isBlogMode) return;
     const observer = new IntersectionObserver((entries) => {
       let visibleSection = null;
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          visibleSection = entry.target.id;
-        }
-      });
+      entries.forEach(entry => { if (entry.isIntersecting) visibleSection = entry.target.id; });
       if (visibleSection) setActiveSection(visibleSection);
     }, { rootMargin: '-100px 0px -60% 0px', threshold: 0 });
 
@@ -197,7 +301,7 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
     });
 
     return () => observer.disconnect();
-  }, [safeConfig]);
+  }, [safeConfig, isBlogMode]);
 
   const handleProductChange = (type) => {
     setProductType(type);
@@ -210,20 +314,12 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
     return [{ value: 0, label: "인원 선택" }, ...options];
   };
 
-  const getPetOptions = () => {
-    return [
-      { value: -1, label: "반려동물 선택" },
-      { value: 0, label: "없음" },
-      { value: 1, label: "1마리" },
-      { value: 2, label: "2마리" }
-    ];
-  };
+  const getPetOptions = () => [
+    { value: -1, label: "반려동물 선택" }, { value: 0, label: "없음" }, { value: 1, label: "1마리" }, { value: 2, label: "2마리" }
+  ];
 
   useEffect(() => {
-    if (peopleCount === 0 || petCount === -1) {
-      setTotalCost(0);
-      return;
-    }
+    if (peopleCount === 0 || petCount === -1) { setTotalCost(0); return; }
     let cost = safeConfig.prices[productType][dateType];
     if (productType === PRODUCT_TYPES.FAMILY && peopleCount > safeConfig.prices.family.basePeople) {
       cost += (peopleCount - safeConfig.prices.family.basePeople) * safeConfig.prices.family.extraPersonCost;
@@ -250,25 +346,34 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
     return visits.filter(v => v.timestamp >= startOfToday.getTime()).length;
   }, [visits]);
 
-  // --- 추가 계산 로직 ---
   const basePeopleAmount = safeConfig.prices.family.basePeople;
-  const extraPeopleCount = productType === PRODUCT_TYPES.FAMILY && peopleCount > basePeopleAmount 
-    ? peopleCount - basePeopleAmount 
-    : 0;
+  const extraPeopleCount = productType === PRODUCT_TYPES.FAMILY && peopleCount > basePeopleAmount ? peopleCount - basePeopleAmount : 0;
   const extraPeopleTotalCost = extraPeopleCount * safeConfig.prices.family.extraPersonCost;
 
-  // --- 네비게이션 스크롤 함수 ---
   const scrollToSection = (id) => {
     setIsSidebarOpen(false);
     setTimeout(() => {
       const element = document.getElementById(id);
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }, 300); // 사이드바가 닫히는 애니메이션(0.3s) 이후 스크롤 실행
+      if (element) element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 300);
   };
 
-  // --- 사이드바 메뉴 정의 ---
+  const toggleFolder = (id) => {
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSidebarFolder = (id) => {
+    setSidebarExpandedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
   const SIDEBAR_MENUS = [
     { id: 'section-options', label: '옵션 선택', icon: Camera, visible: true },
     { id: 'section-estimate', label: '실시간 견적서', icon: Calculator, visible: true },
@@ -277,61 +382,454 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
     { id: 'section-faq', label: '자주 묻는 질문', icon: HelpCircle, visible: safeConfig.faqs && safeConfig.faqs.length > 0 },
     { id: 'section-frame-prices', label: '액자 가격표', icon: ImagePlus, visible: true },
     { id: 'section-kakao', label: '카카오톡 채팅 상담', icon: MessageSquare, visible: true },
-  ];
+  ].filter(menu => menu.visible);
 
   return (
-    <div className="min-h-full bg-slate-50 text-slate-800 font-sans pb-24 relative overflow-x-hidden pt-[56px] sm:pt-[60px]">
+    <div className={`min-h-screen transition-colors duration-500 font-sans pb-24 relative overflow-x-hidden pt-[56px] sm:pt-[60px] ${isBlogMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
       
       {/* 1. Top Navigation Bar */}
-      <header className="fixed top-0 left-0 right-0 h-[56px] sm:h-[60px] bg-white/95 backdrop-blur-[16px] z-[90] flex items-center justify-between px-3 sm:px-4 border-b border-slate-100 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+      <header className={`fixed top-0 left-0 right-0 h-[56px] sm:h-[60px] z-[90] flex items-center justify-between px-3 sm:px-4 border-b backdrop-blur-[16px] transition-colors duration-500 ${isBlogMode ? 'bg-slate-950/80 border-slate-800 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.5)]' : 'bg-white/95 border-slate-100 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]'}`}>
         <button 
           onClick={() => setIsSidebarOpen(true)} 
-          className="p-2 sm:p-2.5 rounded-full hover:bg-slate-100 transition-colors w-[44px] h-[44px] flex items-center justify-center"
-          aria-label="메뉴 열기"
+          className={`p-2 sm:p-2.5 rounded-full transition-colors w-[44px] h-[44px] flex items-center justify-center ${isBlogMode ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-slate-100 text-slate-800'}`}
         >
-          <Menu className="w-6 h-6 text-slate-800" />
+          <Menu className="w-6 h-6" />
         </button>
-        <h1 className="text-[16px] sm:text-[18px] font-semibold text-slate-900 absolute left-1/2 -translate-x-1/2 tracking-tight">비뉴뜨 견적계산기</h1>
-        <div className="w-[44px]" /> {/* 우측 여백 균형 */}
+        <h1 className={`text-[16px] sm:text-[18px] font-semibold absolute left-1/2 -translate-x-1/2 tracking-tight ${isBlogMode ? 'text-white' : 'text-slate-900'}`}>비뉴뜨 견적계산기</h1>
+        <ModeToggle isBlogMode={isBlogMode} onToggle={() => setBlogMode(!isBlogMode)} />
       </header>
 
       {/* 2. Sidebar Drawer */}
       <AnimatePresence>
-        {isSidebarOpen && <motion.div key="sidebar-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/40 backdrop-blur-[10px] z-[999] touch-none" />}
+        {isSidebarOpen && <motion.div key="sidebar-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-[4px] z-[999] touch-none" />}
         {isSidebarOpen && (
-          <motion.div key="sidebar-panel" initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ ease: [0.4, 0, 0.2, 1], duration: 0.4 }} className="fixed top-0 left-0 bottom-0 w-[80%] max-w-[320px] bg-white z-[1000] shadow-2xl flex flex-col overflow-y-auto">
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white/95 backdrop-blur-md z-10">
-              <h2 className="text-xl font-bold text-slate-900 tracking-tight">메뉴</h2>
-              <button onClick={() => setIsSidebarOpen(false)} className="p-2 -mr-2 text-slate-400 hover:text-slate-800 rounded-full hover:bg-slate-100">
+          <motion.div key="sidebar-panel" initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ ease: [0.4, 0, 0.2, 1], duration: 0.4 }} className={`fixed top-0 left-0 bottom-0 w-[80%] max-w-[320px] z-[1000] shadow-2xl flex flex-col overflow-y-auto ${isBlogMode ? 'bg-slate-900 border-r border-slate-800' : 'bg-white'}`}>
+            <div className={`p-6 border-b flex items-center justify-between sticky top-0 backdrop-blur-md z-10 ${isBlogMode ? 'border-slate-800 bg-slate-900/95' : 'border-slate-100 bg-white/95'}`}>
+              <h2 className={`text-xl font-bold tracking-tight ${isBlogMode ? 'text-white' : 'text-slate-900'}`}>{isBlogMode ? '블로그 카테고리' : '메뉴'}</h2>
+              <button onClick={() => setIsSidebarOpen(false)} className={`p-2 -mr-2 rounded-full ${isBlogMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-400 hover:text-slate-800 hover:bg-slate-100'}`}>
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-3 flex-1 flex flex-col gap-1.5">
-              {SIDEBAR_MENUS.filter(menu => menu.visible).map(menu => {
-                const isActive = activeSection === menu.id;
-                const IconComponent = menu.icon; // JSX 에러 방지를 위해 변수 할당
-                return (
-                  <motion.button
-                    key={menu.id}
-                    whileTap={{ scale: 0.98, backgroundColor: "rgba(0,0,0,0.05)" }}
-                    onClick={() => scrollToSection(menu.id)}
-                    className={`w-full flex items-center gap-3.5 px-4 py-3.5 text-left text-[15px] font-semibold transition-colors rounded-2xl relative overflow-hidden ${
-                      isActive ? "text-[#1967D2] bg-[#E8F0FE]" : "text-slate-700 hover:bg-slate-50"
-                    }`}
-                  >
-                    <IconComponent className={`w-[22px] h-[22px] flex-shrink-0 ${isActive ? "text-[#1967D2]" : "text-slate-500"}`} />
-                    <span className="truncate">{menu.label}</span>
-                  </motion.button>
-                )
-              })}
+            
+            <div className="p-3 flex-1 flex flex-col gap-1.5 overflow-y-auto">
+              {isBlogMode ? (
+                /* --- Blog Sidebar Tree --- */
+                safeConfig.blogFolders.map(folder => (
+                  <div key={folder.id} className="flex flex-col mb-1">
+                    <button 
+                      onClick={() => toggleSidebarFolder(folder.id)}
+                      className="w-full flex items-center justify-between px-4 py-3.5 text-left text-[15px] font-semibold text-slate-300 hover:bg-slate-800 rounded-xl transition-colors"
+                    >
+                      <div className="flex items-center gap-3 truncate">
+                         <Folder className={`w-5 h-5 flex-shrink-0 ${sidebarExpandedFolders.has(folder.id) ? 'text-blue-400' : 'text-slate-500'}`} />
+                         <span className="truncate">{folder.title}</span>
+                      </div>
+                      <ChevronDown className={`w-4 h-4 flex-shrink-0 text-slate-500 transition-transform ${sidebarExpandedFolders.has(folder.id) ? 'rotate-180' : ''}`} />
+                    </button>
+                    <AnimatePresence>
+                      {sidebarExpandedFolders.has(folder.id) && (
+                        <motion.div initial={{height:0, opacity:0}} animate={{height:'auto', opacity:1}} exit={{height:0, opacity:0}} className="overflow-hidden flex flex-col pl-4 mt-1 space-y-0.5">
+                           {folder.posts.map(post => (
+                             <button 
+                               key={post.id} 
+                               onClick={() => { setSelectedPost(post); setIsSidebarOpen(false); }}
+                               className="w-full flex items-center gap-2.5 px-4 py-3 text-[13px] sm:text-[14px] text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-xl transition-colors text-left font-medium"
+                             >
+                               <FileText className="w-4 h-4 opacity-40 flex-shrink-0" />
+                               <span className="truncate">{post.title}</span>
+                             </button>
+                           ))}
+                           {folder.posts.length === 0 && <div className="px-5 py-2 text-[12px] text-slate-600 font-medium">게시글이 없습니다.</div>}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                ))
+              ) : (
+                /* --- Calculator Sidebar Menus --- */
+                SIDEBAR_MENUS.map(menu => {
+                  const isActive = activeSection === menu.id;
+                  const IconComponent = menu.icon; 
+                  return (
+                    <motion.button
+                      key={menu.id}
+                      whileTap={{ scale: 0.98, backgroundColor: "rgba(0,0,0,0.05)" }}
+                      onClick={() => scrollToSection(menu.id)}
+                      className={`w-full flex items-center justify-between px-4 py-3.5 text-left text-[15px] font-semibold transition-colors rounded-2xl relative overflow-hidden ${
+                        isActive ? "text-[#1967D2] bg-[#E8F0FE]" : "text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3.5 truncate">
+                        <IconComponent className={`w-[22px] h-[22px] flex-shrink-0 ${isActive ? 'text-[#1967D2]' : 'text-slate-500'}`} />
+                        <span className="truncate">{menu.label}</span>
+                      </div>
+                    </motion.button>
+                  )
+                })
+              )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
+      <main className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8 py-8 md:py-12 relative">
+        <AnimatePresence mode="wait">
+          {!isBlogMode ? (
+            /* --- CALCULATOR MODE --- */
+            <motion.div key="calc-mode" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-10 sm:space-y-16">
+              
+              {/* Main Slider */}
+              <div className="rounded-3xl sm:rounded-[2rem] overflow-hidden shadow-2xl shadow-slate-200/50 bg-white border-[3px] sm:border-4 border-white max-w-sm sm:max-w-md mx-auto relative aspect-square">
+                 {safeConfig.sliderImages.length > 0 ? (
+                   <>
+                     <AnimatePresence initial={false}>
+                       <motion.img key={activeSlide} src={safeConfig.sliderImages[activeSlide]} alt="Slider" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.8 }} className="absolute inset-0 w-full h-full object-cover" />
+                     </AnimatePresence>
+                     <div className="absolute bottom-5 sm:bottom-6 left-0 right-0 flex justify-center gap-2 sm:gap-2.5 z-10">
+                       {safeConfig.sliderImages.map((_, i) => <div key={`dot-${i}`} className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${i === activeSlide ? 'w-5 sm:w-6 bg-white shadow-md' : 'w-1.5 sm:w-2 bg-white/60 hover:bg-white/90'}`} />)}
+                     </div>
+                   </>
+                 ) : (
+                   <div className="w-full h-full bg-slate-100 flex flex-col items-center justify-center text-slate-400 font-medium"><ImagePlus className="w-8 h-8 sm:w-10 sm:h-10 mb-2 opacity-50" /><p className="text-xs sm:text-sm text-center px-4">관리자에서 1:1 이미지를 업로드해주세요</p></div>
+                 )}
+              </div>
+
+              <div className="text-center space-y-3 sm:space-y-4 px-2">
+                <h1 className="text-[28px] sm:text-4xl md:text-5xl font-serif font-bold text-slate-900 tracking-tight leading-tight">가족사진 견적 계산기</h1>
+                <p className="text-[15px] sm:text-lg text-slate-500 max-w-2xl mx-auto font-medium whitespace-pre-line leading-relaxed px-2">{safeConfig.introText}</p>
+              </div>
+
+              <div className="grid lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-12 items-start">
+                <div id="section-options" className="lg:col-span-7 space-y-6 sm:space-y-8 scroll-mt-24">
+                  <section className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100">
+                    <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><Camera className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">촬영 상품 선택</h2></div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+                      <RadioCard title="가족사진" description="3인 이상" selected={productType === PRODUCT_TYPES.FAMILY} onClick={() => handleProductChange(PRODUCT_TYPES.FAMILY)} />
+                      <RadioCard title="만삭사진" description="2인 고정" selected={productType === PRODUCT_TYPES.MATERNITY} onClick={() => handleProductChange(PRODUCT_TYPES.MATERNITY)} />
+                      <RadioCard title="부부/커플" description="2인 고정" selected={productType === PRODUCT_TYPES.COUPLE} onClick={() => handleProductChange(PRODUCT_TYPES.COUPLE)} />
+                    </div>
+                  </section>
+                  
+                  <section className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100">
+                    <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><Calendar className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">희망 일정</h2></div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                      <RadioCard title="주중 / 평일" description="월요일 - 금요일" selected={dateType === DATE_TYPES.WEEKDAY} onClick={() => setDateType(DATE_TYPES.WEEKDAY)} />
+                      <RadioCard title="주말 / 공휴일" description="토, 일, 공휴일" selected={dateType === DATE_TYPES.WEEKEND} onClick={() => setDateType(DATE_TYPES.WEEKEND)} />
+                    </div>
+                  </section>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
+                    <section className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100 relative overflow-visible">
+                      {peopleCount === 0 && <span className="absolute -top-2.5 right-5 sm:-top-3 sm:right-6 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 sm:py-1 rounded-full animate-bounce shadow-md shadow-red-500/30">필수</span>}
+                      <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><Users className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">총 인원</h2></div>
+                      <SelectCustom value={peopleCount} onChange={setPeopleCount} options={getPeopleOptions()} className={peopleCount === 0 ? "ring-2 ring-red-400/50 rounded-xl" : ""} />
+                    </section>
+                    <section className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100 relative overflow-visible">
+                      {petCount === -1 && <span className="absolute -top-2.5 right-5 sm:-top-3 sm:right-6 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 sm:py-1 rounded-full animate-bounce shadow-md shadow-red-500/30">필수</span>}
+                      <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><Camera className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">반려동물</h2></div>
+                      <SelectCustom value={petCount} onChange={setPetCount} options={getPetOptions()} className={petCount === -1 ? "ring-2 ring-red-400/50 rounded-xl" : ""} />
+                    </section>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-5 space-y-6 sm:space-y-8">
+                  <div className="sticky top-[84px]">
+                    <div id="section-estimate" className="bg-slate-900 text-white rounded-3xl sm:rounded-[2rem] p-6 sm:p-8 shadow-2xl relative overflow-hidden scroll-mt-24">
+                      <div className="absolute top-0 right-0 w-64 h-64 sm:w-72 sm:h-72 bg-blue-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
+                      <div className="relative z-10">
+                        <div className="flex items-center gap-2 sm:gap-3 mb-6 sm:mb-8 text-slate-300">
+                          <Calculator className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
+                          <span className="text-[13px] sm:text-sm font-bold uppercase tracking-widest">견적서</span>
+                        </div>
+                        <div className="space-y-4 sm:space-y-5 border-b border-white/10 pb-5 sm:pb-6 mb-5 sm:mb-6 text-[13px] sm:text-[15px]">
+                          <div className="flex justify-between items-center text-slate-300"><span>상품</span><span className="font-semibold text-white bg-white/10 px-2.5 sm:px-3 py-1 rounded-md sm:rounded-lg">{productType === PRODUCT_TYPES.FAMILY ? "가족사진" : productType === PRODUCT_TYPES.MATERNITY ? "만삭사진" : "부부/커플"}</span></div>
+                          <div className="flex justify-between items-center text-slate-300"><span>일정</span><span className="font-semibold text-white">{dateType === DATE_TYPES.WEEKDAY ? "주중/평일" : "주말/공휴일"}</span></div>
+                          <div className="flex justify-between items-center text-slate-300"><span>인원</span><span className="font-semibold text-white">{peopleCount === 0 ? <span className="text-yellow-400 animate-pulse">선택 대기중</span> : `${peopleCount}명`}</span></div>
+                          <div className="flex justify-between items-center text-slate-300"><span>반려동물</span><span className="font-semibold text-white">{petCount === -1 ? <span className="text-yellow-400 animate-pulse">선택 대기중</span> : petCount === 0 ? "없음" : `${petCount}마리`}</span></div>
+                          {totalCost > 0 && (
+                            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="pt-2 space-y-3 sm:space-y-4">
+                              <div className="flex justify-between items-center text-slate-300"><span>액자</span><span className="font-semibold text-white text-right">{productType === PRODUCT_TYPES.FAMILY ? "16R 아크릴 우드 (약 40x50cm)" : "12R 아크릴 우드 (약 30x43cm)"}</span></div>
+                              <div className="flex justify-between items-center"><span className="font-semibold text-yellow-400 underline underline-offset-[3px] decoration-yellow-400/50">고화질 원본</span><span className="font-bold text-yellow-400">무료</span></div>
+                            </motion.div>
+                          )}
+                        </div>
+
+                        {totalCost > 0 && (
+                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-6 space-y-3">
+                            {(extraPeopleCount > 0 || petCount > 0) ? (
+                              <>
+                                {petCount > 0 && (
+                                  <div className="bg-slate-800/80 rounded-xl p-4 sm:p-5 flex justify-between items-center text-[13px] sm:text-[14px] shadow-inner border border-white/5">
+                                    <span className="text-yellow-400 font-medium">반려동물 추가 ({petCount}마리)</span>
+                                    <span className="text-yellow-400 font-bold">+ {formatCurrency(petCount === 2 ? 22000 : 0)} 원</span>
+                                  </div>
+                                )}
+                                {extraPeopleCount > 0 && (
+                                  <div className="bg-slate-800/80 rounded-xl p-4 sm:p-5 flex flex-col gap-2.5 text-[13px] sm:text-[14px] shadow-inner border border-white/5">
+                                    <div className="flex justify-between items-center text-slate-300">
+                                      <span>기본 인원 ({basePeopleAmount}인)</span>
+                                      <span>포함</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-yellow-400">
+                                      <span className="font-medium">추가 인원 ({extraPeopleCount}명)</span>
+                                      <span className="font-bold">+ {formatCurrency(extraPeopleTotalCost)} 원</span>
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <div className="bg-slate-800/80 rounded-xl p-4 sm:p-5 flex justify-center items-center text-[13px] sm:text-[14px] text-slate-400 shadow-inner border border-white/5">
+                                추가금이 없습니다.
+                              </div>
+                            )}
+                          </motion.div>
+                        )}
+
+                        <div className="space-y-1 sm:space-y-2 mb-6 sm:mb-8">
+                          <div className="text-slate-400 text-xs sm:text-sm font-medium">견적 금액</div>
+                          <AnimatePresence mode="wait">
+                            {totalCost === 0 ? (
+                              <motion.div key="wait" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[15px] sm:text-lg font-bold text-yellow-400 py-2 sm:py-3">인원 및 반려동물을 모두 선택해주세요.</motion.div>
+                            ) : (
+                              <motion.div key="price" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-4xl sm:text-5xl font-serif font-bold text-white tracking-tight pt-1">{formatCurrency(totalCost)} <span className="text-lg sm:text-2xl text-slate-400 font-sans font-medium">원</span></motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                        <motion.a whileTap={{ scale: 0.97 }} href={safeConfig.consultationLink} target="_blank" rel="noopener noreferrer" className="w-full py-3.5 sm:py-4 bg-white text-slate-900 rounded-xl sm:rounded-2xl font-bold text-[14px] min-[375px]:text-[15px] sm:text-lg hover:bg-slate-100 transition-colors flex items-center justify-center gap-1.5 sm:gap-2 group shadow-xl whitespace-nowrap">
+                          <span>{safeConfig.consultationText}</span><ArrowRight className="w-5 h-5 sm:w-6 sm:h-6 group-hover:translate-x-1.5 transition-transform" />
+                        </motion.a>
+                        <div className="mt-3 sm:mt-4 w-full text-center bg-white/5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl px-1 sm:px-2 overflow-hidden"><p className="text-[10.5px] min-[375px]:text-[11.5px] sm:text-[13px] text-slate-300 font-medium whitespace-nowrap tracking-tight sm:tracking-normal">{safeConfig.bottomNoticeText}</p></div>
+                      </div>
+                    </div>
+
+                    {safeConfig.priceTableImage && (
+                      <div id="section-price-table" className="mt-5 sm:mt-6 bg-white rounded-3xl sm:rounded-[2rem] p-3 sm:p-4 shadow-sm border border-slate-100 overflow-hidden scroll-mt-24">
+                         <h3 className="font-bold text-slate-800 mb-2 sm:mb-3 px-2 flex items-center gap-1.5 sm:gap-2 text-[15px] sm:text-base"><Calculator className="w-4 h-4 text-blue-500"/> 촬영 상품 가격표</h3>
+                         <img src={safeConfig.priceTableImage} alt="Price Table" className="w-full h-auto object-contain rounded-xl sm:rounded-2xl border border-slate-50" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-8 sm:mt-12 space-y-6 sm:space-y-8">
+                {/* --- Review Slider Section --- */}
+                {safeConfig.reviewImages && safeConfig.reviewImages.length > 0 && (
+                  <section id="section-reviews" className="bg-white rounded-3xl sm:rounded-[2rem] py-6 sm:py-10 shadow-sm border border-slate-100 overflow-hidden scroll-mt-24">
+                    <div className="flex items-center justify-center gap-2 mb-8 sm:mb-10 px-5">
+                      <Star className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-400 fill-yellow-400" />
+                      <h2 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">리뷰</h2>
+                      <Star className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-400 fill-yellow-400" />
+                    </div>
+                    
+                    <div className="relative h-[460px] sm:h-[600px] w-full flex items-center justify-center touch-pan-y">
+                      {safeConfig.reviewImages.map((img, i) => {
+                        const offset = i - activeReviewSlide;
+                        if (Math.abs(offset) > 2) return null;
+
+                        return (
+                          <motion.div
+                            key={`review-slide-${i}`}
+                            drag="x"
+                            dragConstraints={{ left: 0, right: 0 }}
+                            dragElastic={0.2}
+                            onDragEnd={(e, info) => {
+                              if (info.offset.x < -50 && activeReviewSlide < safeConfig.reviewImages.length - 1) setActiveReviewSlide(prev => prev + 1);
+                              if (info.offset.x > 50 && activeReviewSlide > 0) setActiveReviewSlide(prev => prev - 1);
+                            }}
+                            initial={false}
+                            animate={{
+                              x: `calc(${offset * 105}%)`,
+                              scale: offset === 0 ? 1.1 : 0.9,
+                              opacity: offset === 0 ? 1 : Math.abs(offset) === 1 ? 0.5 : 0,
+                              filter: offset === 0 ? "blur(0px)" : "blur(2px)",
+                              zIndex: offset === 0 ? 10 : 5
+                            }}
+                            transition={{ duration: 0.35, ease: "easeInOut" }}
+                            onClick={() => {
+                              if (offset === 0) setLightboxIndex(i);
+                              else setActiveReviewSlide(i);
+                            }}
+                            className={`absolute w-[280px] sm:w-[380px] aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl cursor-pointer ${offset === 0 ? 'ring-2 ring-white/50' : ''}`}
+                          >
+                            <img src={img} alt={`Review ${i}`} className="w-full h-full object-cover pointer-events-none bg-slate-50" draggable={false} />
+                          </motion.div>
+                        )
+                      })}
+                    </div>
+                    <div className="flex justify-center gap-2 mt-8">
+                      {safeConfig.reviewImages.map((_, i) => (
+                        <div key={`dot-${i}`} className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${i === activeReviewSlide ? 'w-5 sm:w-6 bg-slate-800' : 'w-1.5 sm:w-2 bg-slate-200'}`} />
+                      ))}
+                    </div>
+                    <p className="text-center text-xs sm:text-sm text-slate-400 mt-4 px-4 font-medium">사진을 넘겨보거나 중앙 사진을 클릭하여 확대해보세요.</p>
+                  </section>
+                )}
+
+                {/* --- FAQ Section --- */}
+                {safeConfig.faqs && safeConfig.faqs.length > 0 && (
+                  <section id="section-faq" className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100 scroll-mt-24">
+                    <div className="flex items-center gap-2 sm:gap-3 mb-6 sm:mb-8">
+                      <div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><HelpCircle className="w-4 h-4 sm:w-5 sm:h-5" /></div>
+                      <h2 className="text-[17px] sm:text-xl font-bold text-slate-800">자주 묻는 질문</h2>
+                    </div>
+                    <div className="space-y-3 sm:space-y-4">
+                      {safeConfig.faqs.map((faq, i) => (
+                        <div key={`faq-item-${i}`} className={`rounded-xl sm:rounded-2xl border transition-colors ${openFaq === i ? 'border-blue-500 bg-blue-50/30' : 'border-slate-200 bg-white hover:border-blue-300'}`}>
+                          <button 
+                            onClick={() => setOpenFaq(openFaq === i ? null : i)} 
+                            className="w-full px-4 py-4 sm:px-6 sm:py-5 text-left flex justify-between items-center gap-4"
+                          >
+                            <span className={`text-[14px] sm:text-[15px] font-bold leading-snug ${openFaq === i ? 'text-blue-700' : 'text-slate-800'}`}>
+                              <span className="text-blue-500 mr-2 font-black">Q.</span>{faq.question}
+                            </span>
+                            <motion.div animate={{ rotate: openFaq === i ? 180 : 0 }} className="flex-shrink-0 text-slate-400">
+                              <ChevronDown className="w-5 h-5 sm:w-6 sm:h-6" />
+                            </motion.div>
+                          </button>
+                          <AnimatePresence initial={false}>
+                            {openFaq === i && (
+                              <motion.div key={`faq-content-${i}`} initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.3 }} className="overflow-hidden">
+                                <div className="px-4 pb-4 sm:px-6 sm:pb-5 text-[13px] sm:text-[14px] text-slate-600 whitespace-pre-line leading-relaxed border-t border-slate-100/50 pt-3 sm:pt-4">
+                                  <span className="text-slate-400 font-bold mr-2">A.</span>{faq.answer}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* --- Frame Price Section --- */}
+                <section id="section-frame-prices" className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100 scroll-mt-24">
+                  <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><ImagePlus className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">액자 가격표 참고</h2></div>
+                  <div className="mb-5 sm:mb-6 text-center text-[10.5px] min-[375px]:text-[11.5px] sm:text-[14px] text-white font-bold bg-slate-900 py-2.5 sm:py-3 rounded-lg sm:rounded-xl px-1 shadow-inner whitespace-nowrap tracking-tight sm:tracking-normal overflow-hidden">모든 촬영상품엔 아크릴 우드 프레임이 포함되어있습니다.</div>
+                  <div className="space-y-8 sm:space-y-10">
+                    <div className="w-full">
+                      <h3 className="text-[15px] sm:text-lg font-bold mb-3 sm:mb-4 text-slate-800 px-1">아크릴 우드 프레임 액자</h3>
+                      <table className="w-full text-[11.5px] min-[375px]:text-[12px] sm:text-sm md:text-[15px] text-left border-collapse">
+                        <thead><tr className="border-b-2 border-slate-200"><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 whitespace-nowrap">R 규격</th><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 whitespace-nowrap">약 cm 사이즈</th><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 text-right whitespace-nowrap">가격</th></tr></thead>
+                        <tbody className="text-slate-700">
+                          {FRAME_SIZES.map((item, idx) => {
+                            const isDefault = isWoodDefault(item.id);
+                            return (
+                              <tr key={`wood-${item.id}`} className={idx !== FRAME_SIZES.length - 1 ? "border-b border-slate-100" : ""}>
+                                <td className={`py-3 sm:py-3.5 px-1 sm:px-2 font-semibold whitespace-nowrap ${isDefault ? 'text-red-500' : ''}`}>{item.label} {isDefault && <span className="text-[10px] sm:text-xs ml-0.5">(기본 제공)</span>}</td>
+                                <td className={`py-3 sm:py-3.5 px-1 sm:px-2 whitespace-nowrap ${isDefault ? 'text-red-500 font-semibold' : ''}`}>{item.cm}</td>
+                                <td className={`py-3 sm:py-3.5 px-1 sm:px-2 text-right whitespace-nowrap ${isDefault ? 'text-red-500 font-bold' : ''}`}>{formatCurrency(safeConfig.framePrices.wood[item.id])}원</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="pt-5 sm:pt-6 border-t-2 border-slate-100 w-full">
+                      <h3 className="text-[15px] sm:text-lg font-bold mb-3 sm:mb-4 text-slate-800 px-1">아크릴 프레임 리스 액자</h3>
+                      <table className="w-full text-[11.5px] min-[375px]:text-[12px] sm:text-sm md:text-[15px] text-left border-collapse">
+                        <thead><tr className="border-b-2 border-slate-200"><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 whitespace-nowrap">R 규격</th><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 whitespace-nowrap">약 cm 사이즈</th><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 text-right whitespace-nowrap">가격</th></tr></thead>
+                        <tbody className="text-slate-700">
+                          {FRAME_SIZES.map((item, idx) => (
+                            <tr key={`frameless-${item.id}`} className={idx !== FRAME_SIZES.length - 1 ? "border-b border-slate-100" : ""}>
+                              <td className="py-3 sm:py-3.5 px-1 sm:px-2 font-semibold whitespace-nowrap">{item.label}</td><td className="py-3 sm:py-3.5 px-1 sm:px-2 whitespace-nowrap">{item.cm}</td><td className="py-3 sm:py-3.5 px-1 sm:px-2 text-right whitespace-nowrap">{formatCurrency(safeConfig.framePrices.frameless[item.id])}원</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </section>
+
+                <div id="section-kakao" className="pt-2 sm:pt-4 flex justify-center pb-8 scroll-mt-24">
+                  <motion.a whileTap={{ scale: 0.97 }} href={safeConfig.consultationLink} target="_blank" rel="noopener noreferrer" className="w-full max-w-lg py-4 sm:py-5 bg-[#FEE500] text-slate-900 rounded-2xl font-bold text-[15px] sm:text-[17px] hover:bg-[#FADA0A] transition-colors flex items-center justify-center gap-2 sm:gap-2.5 shadow-xl shadow-yellow-500/20">
+                    <MessageSquare className="w-5 h-5 sm:w-6 sm:h-6" />
+                    <span>{safeConfig.consultationText}</span>
+                    <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6" />
+                  </motion.a>
+                </div>
+              </div>
+
+              <div className="mt-8 sm:mt-10 mb-8 text-center">
+                <div className="inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 bg-white rounded-full text-[13px] sm:text-sm text-slate-500 shadow-sm border border-slate-200">
+                  <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-500" />오늘 방문자 수 <strong className="text-slate-800 ml-0.5 sm:ml-1">{todayVisitors}</strong>명
+                </div>
+              </div>
+            </motion.div>
+          ) : (
+            /* --- BLOG MODE --- */
+            <motion.div key="blog-mode" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-8 sm:space-y-12">
+              <div className="text-center space-y-3 pt-6 pb-4">
+                <h1 className="text-[28px] sm:text-4xl md:text-5xl font-serif font-bold text-white tracking-tight leading-tight">{safeConfig.blogTitle}</h1>
+                <p className="text-[14px] sm:text-base text-slate-400 font-medium whitespace-pre-line">{safeConfig.blogSubtitle}</p>
+              </div>
+
+              <div className="space-y-6 sm:space-y-8 pb-10">
+                {safeConfig.blogFolders.map(folder => (
+                  <div key={folder.id} className="space-y-3 sm:space-y-4">
+                    <button 
+                      onClick={() => toggleFolder(folder.id)}
+                      className="w-full flex items-center justify-between p-4 sm:p-5 bg-slate-800/80 rounded-2xl border border-slate-700 hover:border-slate-500 transition-all group shadow-sm hover:shadow-md"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Folder className={`w-5 h-5 sm:w-6 sm:h-6 transition-colors ${expandedFolders.has(folder.id) ? 'text-blue-400' : 'text-slate-400'}`} />
+                        <span className="text-[16px] sm:text-lg font-bold text-white tracking-tight">{folder.title}</span>
+                        <span className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full font-bold ml-1">{folder.posts.length}</span>
+                      </div>
+                      <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-300 ${expandedFolders.has(folder.id) ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    <AnimatePresence>
+                      {expandedFolders.has(folder.id) && (
+                        <motion.div 
+                          initial={{ height: 0, opacity: 0 }} 
+                          animate={{ height: 'auto', opacity: 1 }} 
+                          exit={{ height: 0, opacity: 0 }} 
+                          transition={{ duration: 0.3 }}
+                          className="overflow-hidden space-y-3 sm:space-y-4 px-1 sm:px-2"
+                        >
+                          {folder.posts.map(post => (
+                            <motion.div 
+                              key={post.id} 
+                              whileHover={{ scale: 1.01 }}
+                              whileTap={{ scale: 0.98 }}
+                              onClick={() => setSelectedPost(post)}
+                              className="bg-slate-800/40 p-3 sm:p-4 rounded-2xl border border-slate-700/50 flex gap-4 cursor-pointer hover:bg-slate-700 hover:border-slate-600 transition-colors group shadow-sm"
+                            >
+                              <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-xl overflow-hidden bg-slate-900 flex-shrink-0 shadow-inner">
+                                {post.thumbnail ? <img src={post.thumbnail} className="w-full h-full object-cover" alt={post.title} /> : <div className="w-full h-full flex items-center justify-center text-slate-600"><ImagePlus className="w-6 h-6" /></div>}
+                              </div>
+                              <div className="flex-1 flex flex-col justify-center sm:justify-between py-1">
+                                <div className="space-y-2 sm:space-y-3">
+                                  <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                                    {post.tags.map((t, idx) => {
+                                      const isObj = typeof t === 'object';
+                                      const text = isObj ? t.text : t;
+                                      const color = isObj ? t.color : (idx % 2 === 0 ? "bg-red-500" : "bg-blue-600");
+                                      return <BouncyTag key={isObj ? t.id : idx} text={text} colorClass={color} />;
+                                    })}
+                                  </div>
+                                  <h4 className="font-bold text-[14px] sm:text-[16px] text-white line-clamp-2 leading-snug group-hover:text-blue-300 transition-colors">{post.title}</h4>
+                                </div>
+                                <span className="text-[11px] sm:text-xs text-slate-400 font-medium mt-2 block">{post.date}</span>
+                              </div>
+                            </motion.div>
+                          ))}
+                          {folder.posts.length === 0 && <div className="p-4 text-center text-sm text-slate-500 bg-slate-800/30 rounded-xl border border-slate-700/50">등록된 게시물이 없습니다.</div>}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
       {/* --- Lightbox (Review Expansion) --- */}
       <AnimatePresence>
-        {lightboxIndex !== null && safeConfig.reviewImages[lightboxIndex] && (
+        {lightboxIndex !== null && safeConfig.reviewImages[lightboxIndex] && !isBlogMode && (
           <motion.div 
             key="lightbox-overlay"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}
@@ -371,319 +869,61 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
         )}
       </AnimatePresence>
 
+      {/* --- Blog Slide Sheet (Bottom Sheet Modal) --- */}
       <AnimatePresence>
-        {isPopupOpen && safeConfig.popupEnabled && (
-          <motion.div key="popup-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <div className="absolute inset-0" onClick={() => setIsPopupOpen(false)} />
-            <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="relative bg-white rounded-3xl shadow-2xl max-w-xs sm:max-w-sm w-full p-6 sm:p-8 text-center z-10">
-              <button onClick={() => setIsPopupOpen(false)} className="absolute top-3 right-3 sm:top-4 sm:right-4 p-2 bg-slate-100 rounded-full text-slate-500 hover:text-slate-800"><X className="w-4 h-4 sm:w-5 sm:h-5" /></button>
-              {safeConfig.popupImage ? (
-                <div className="mx-auto w-24 h-24 sm:w-32 sm:h-32 rounded-full overflow-hidden mb-5 sm:mb-6 border-4 border-slate-50 shadow-inner"><img src={safeConfig.popupImage} alt="Popup" className="w-full h-full object-cover" /></div>
-              ) : (
-                <div className="mx-auto w-24 h-24 sm:w-32 sm:h-32 rounded-full mb-5 sm:mb-6 bg-slate-100 flex items-center justify-center text-slate-400 text-xs sm:text-sm border-4 border-white shadow-inner">사진 공란</div>
-              )}
-              <h2 className="text-xl sm:text-2xl font-bold text-slate-900 mb-3 sm:mb-4 tracking-tight">견적 계산기 안내</h2>
-              <p className="text-slate-600 mb-6 sm:mb-8 leading-relaxed whitespace-pre-line text-[13px] sm:text-sm">{safeConfig.popupText}</p>
-              <motion.button whileTap={{ scale: 0.95 }} onClick={() => setIsPopupOpen(false)} className="w-full py-3.5 sm:py-4 bg-slate-900 text-white rounded-xl sm:rounded-2xl font-bold text-base sm:text-lg hover:bg-slate-800 shadow-xl shadow-slate-900/20">10초만에 견적 계산하기</motion.button>
+        {selectedPost && (
+          <>
+            <motion.div key="sheet-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedPost(null)} className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[2000]" />
+            <motion.div 
+              key="sheet-content"
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="fixed bottom-0 left-0 right-0 h-[92vh] sm:h-[85vh] max-w-3xl mx-auto bg-white rounded-t-[2rem] z-[2010] shadow-2xl overflow-hidden flex flex-col"
+            >
+              {/* 개선된 손잡이 및 닫기 버튼 영역 */}
+              <div className="pt-4 sm:pt-5 pb-3 flex items-center justify-center relative bg-white z-20">
+                <div className="w-12 h-1.5 bg-slate-200 hover:bg-slate-300 transition-colors rounded-full cursor-grab active:cursor-grabbing" onClick={() => setSelectedPost(null)} />
+              </div>
+              
+              <button 
+                onClick={() => setSelectedPost(null)} 
+                className="absolute top-3 right-3 sm:top-4 sm:right-4 p-2 sm:p-2.5 bg-slate-100 rounded-full text-slate-500 hover:text-slate-800 hover:bg-slate-200 transition-colors z-[2050]"
+              >
+                <X className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2.5} />
+              </button>
+
+              <div className="flex-1 bg-white relative overflow-hidden">
+                <iframe src={selectedPost.link} className="w-full h-full border-none relative z-10 bg-white" title="Blog Post" sandbox="allow-scripts allow-same-origin allow-popups" />
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none opacity-40 z-0">
+                   <Loader2 className="w-8 h-8 animate-spin mb-2" />
+                   <p className="text-slate-900 font-bold text-sm">콘텐츠를 불러오는 중입니다...</p>
+                </div>
+              </div>
             </motion.div>
-          </motion.div>
+          </>
         )}
       </AnimatePresence>
 
-      <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8 py-8 md:py-12">
-        {/* Main Slider */}
-        <div className="mb-10 sm:mb-16 rounded-3xl sm:rounded-[2rem] overflow-hidden shadow-2xl shadow-slate-200/50 bg-white border-[3px] sm:border-4 border-white max-w-sm sm:max-w-md mx-auto relative aspect-square">
-           {safeConfig.sliderImages.length > 0 ? (
-             <>
-               <AnimatePresence initial={false}>
-                 <motion.img key={activeSlide} src={safeConfig.sliderImages[activeSlide]} alt="Slider" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.8 }} className="absolute inset-0 w-full h-full object-cover" />
-               </AnimatePresence>
-               <div className="absolute bottom-5 sm:bottom-6 left-0 right-0 flex justify-center gap-2 sm:gap-2.5 z-10">
-                 {safeConfig.sliderImages.map((_, i) => <div key={`dot-${i}`} className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${i === activeSlide ? 'w-5 sm:w-6 bg-white shadow-md' : 'w-1.5 sm:w-2 bg-white/60 hover:bg-white/90'}`} />)}
-               </div>
-             </>
-           ) : (
-             <div className="w-full h-full bg-slate-100 flex flex-col items-center justify-center text-slate-400 font-medium"><ImagePlus className="w-8 h-8 sm:w-10 sm:h-10 mb-2 opacity-50" /><p className="text-xs sm:text-sm text-center px-4">관리자에서 1:1 이미지를 업로드해주세요</p></div>
-           )}
-        </div>
-
-        <div className="text-center mb-10 sm:mb-16 space-y-3 sm:space-y-4 px-2">
-          <h1 className="text-[28px] sm:text-4xl md:text-5xl font-serif font-bold text-slate-900 tracking-tight leading-tight">가족사진 견적 계산기</h1>
-          <p className="text-[15px] sm:text-lg text-slate-500 max-w-2xl mx-auto font-medium whitespace-pre-line leading-relaxed px-2">{safeConfig.introText}</p>
-        </div>
-
-        <div className="grid lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-12 items-start">
-          <div id="section-options" className="lg:col-span-7 space-y-6 sm:space-y-8 scroll-mt-24">
-            <section className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100">
-              <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><Camera className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">촬영 상품 선택</h2></div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-                <RadioCard title="가족사진" description="3인 이상" selected={productType === PRODUCT_TYPES.FAMILY} onClick={() => handleProductChange(PRODUCT_TYPES.FAMILY)} />
-                <RadioCard title="만삭사진" description="2인 고정" selected={productType === PRODUCT_TYPES.MATERNITY} onClick={() => handleProductChange(PRODUCT_TYPES.MATERNITY)} />
-                <RadioCard title="부부/커플" description="2인 고정" selected={productType === PRODUCT_TYPES.COUPLE} onClick={() => handleProductChange(PRODUCT_TYPES.COUPLE)} />
-              </div>
-            </section>
-            
-            <section className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100">
-              <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><Calendar className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">희망 일정</h2></div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <RadioCard title="주중 / 평일" description="월요일 - 금요일" selected={dateType === DATE_TYPES.WEEKDAY} onClick={() => setDateType(DATE_TYPES.WEEKDAY)} />
-                <RadioCard title="주말 / 공휴일" description="토, 일, 공휴일" selected={dateType === DATE_TYPES.WEEKEND} onClick={() => setDateType(DATE_TYPES.WEEKEND)} />
-              </div>
-            </section>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
-              <section className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100 relative overflow-visible">
-                {peopleCount === 0 && <span className="absolute -top-2.5 right-5 sm:-top-3 sm:right-6 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 sm:py-1 rounded-full animate-bounce shadow-md shadow-red-500/30">필수</span>}
-                <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><Users className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">총 인원</h2></div>
-                <SelectCustom value={peopleCount} onChange={setPeopleCount} options={getPeopleOptions()} className={peopleCount === 0 ? "ring-2 ring-red-400/50 rounded-xl" : ""} />
-              </section>
-              <section className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100 relative overflow-visible">
-                {petCount === -1 && <span className="absolute -top-2.5 right-5 sm:-top-3 sm:right-6 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 sm:py-1 rounded-full animate-bounce shadow-md shadow-red-500/30">필수</span>}
-                <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><Camera className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">반려동물</h2></div>
-                <SelectCustom value={petCount} onChange={setPetCount} options={getPetOptions()} className={petCount === -1 ? "ring-2 ring-red-400/50 rounded-xl" : ""} />
-              </section>
-            </div>
-
-          </div>
-
-          <div className="lg:col-span-5 space-y-6 sm:space-y-8">
-            <div className="sticky top-[84px]"> {/* top-bar 고려하여 위치 조정 */}
-              <div id="section-estimate" className="bg-slate-900 text-white rounded-3xl sm:rounded-[2rem] p-6 sm:p-8 shadow-2xl relative overflow-hidden scroll-mt-24">
-                <div className="absolute top-0 right-0 w-64 h-64 sm:w-72 sm:h-72 bg-blue-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
-                <div className="relative z-10">
-                  <div className="flex items-center gap-2 sm:gap-3 mb-6 sm:mb-8 text-slate-300">
-                    <Calculator className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
-                    <span className="text-[13px] sm:text-sm font-bold uppercase tracking-widest">견적서</span>
-                  </div>
-                  <div className="space-y-4 sm:space-y-5 border-b border-white/10 pb-5 sm:pb-6 mb-5 sm:mb-6 text-[13px] sm:text-[15px]">
-                    <div className="flex justify-between items-center text-slate-300"><span>상품</span><span className="font-semibold text-white bg-white/10 px-2.5 sm:px-3 py-1 rounded-md sm:rounded-lg">{productType === PRODUCT_TYPES.FAMILY ? "가족사진" : productType === PRODUCT_TYPES.MATERNITY ? "만삭사진" : "부부/커플"}</span></div>
-                    <div className="flex justify-between items-center text-slate-300"><span>일정</span><span className="font-semibold text-white">{dateType === DATE_TYPES.WEEKDAY ? "주중/평일" : "주말/공휴일"}</span></div>
-                    <div className="flex justify-between items-center text-slate-300"><span>인원</span><span className="font-semibold text-white">{peopleCount === 0 ? <span className="text-yellow-400 animate-pulse">선택 대기중</span> : `${peopleCount}명`}</span></div>
-                    <div className="flex justify-between items-center text-slate-300"><span>반려동물</span><span className="font-semibold text-white">{petCount === -1 ? <span className="text-yellow-400 animate-pulse">선택 대기중</span> : petCount === 0 ? "없음" : `${petCount}마리`}</span></div>
-                    {totalCost > 0 && (
-                      <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="pt-2 space-y-3 sm:space-y-4">
-                        <div className="flex justify-between items-center text-slate-300"><span>액자</span><span className="font-semibold text-white text-right">{productType === PRODUCT_TYPES.FAMILY ? "16R 아크릴 우드 (약 40x50cm)" : "12R 아크릴 우드 (약 30x43cm)"}</span></div>
-                        <div className="flex justify-between items-center"><span className="font-semibold text-yellow-400 underline underline-offset-[3px] decoration-yellow-400/50">고화질 원본</span><span className="font-bold text-yellow-400">무료</span></div>
-                      </motion.div>
-                    )}
-                  </div>
-
-                  {/* 추가금 Box 영역 */}
-                  {totalCost > 0 && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-6 space-y-3">
-                      {(extraPeopleCount > 0 || petCount > 0) ? (
-                        <>
-                          {petCount > 0 && (
-                            <div className="bg-slate-800/80 rounded-xl p-4 sm:p-5 flex justify-between items-center text-[13px] sm:text-[14px] shadow-inner border border-white/5">
-                              <span className="text-yellow-400 font-medium">반려동물 추가 ({petCount}마리)</span>
-                              <span className="text-yellow-400 font-bold">+ {formatCurrency(petCount === 2 ? 22000 : 0)} 원</span>
-                            </div>
-                          )}
-                          {extraPeopleCount > 0 && (
-                            <div className="bg-slate-800/80 rounded-xl p-4 sm:p-5 flex flex-col gap-2.5 text-[13px] sm:text-[14px] shadow-inner border border-white/5">
-                              <div className="flex justify-between items-center text-slate-300">
-                                <span>기본 인원 ({basePeopleAmount}인)</span>
-                                <span>포함</span>
-                              </div>
-                              <div className="flex justify-between items-center text-yellow-400">
-                                <span className="font-medium">추가 인원 ({extraPeopleCount}명)</span>
-                                <span className="font-bold">+ {formatCurrency(extraPeopleTotalCost)} 원</span>
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <div className="bg-slate-800/80 rounded-xl p-4 sm:p-5 flex justify-center items-center text-[13px] sm:text-[14px] text-slate-400 shadow-inner border border-white/5">
-                          추가금이 없습니다.
-                        </div>
-                      )}
-                    </motion.div>
-                  )}
-
-                  <div className="space-y-1 sm:space-y-2 mb-6 sm:mb-8">
-                    <div className="text-slate-400 text-xs sm:text-sm font-medium">견적 금액</div>
-                    <AnimatePresence mode="wait">
-                      {totalCost === 0 ? (
-                        <motion.div key="wait" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[15px] sm:text-lg font-bold text-yellow-400 py-2 sm:py-3">인원 및 반려동물을 모두 선택해주세요.</motion.div>
-                      ) : (
-                        <motion.div key="price" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-4xl sm:text-5xl font-serif font-bold text-white tracking-tight pt-1">{formatCurrency(totalCost)} <span className="text-lg sm:text-2xl text-slate-400 font-sans font-medium">원</span></motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                  <motion.a whileTap={{ scale: 0.97 }} href={safeConfig.consultationLink} target="_blank" rel="noopener noreferrer" className="w-full py-3.5 sm:py-4 bg-white text-slate-900 rounded-xl sm:rounded-2xl font-bold text-[14px] min-[375px]:text-[15px] sm:text-lg hover:bg-slate-100 transition-colors flex items-center justify-center gap-1.5 sm:gap-2 group shadow-xl whitespace-nowrap">
-                    <span>{safeConfig.consultationText}</span><ArrowRight className="w-5 h-5 sm:w-6 sm:h-6 group-hover:translate-x-1.5 transition-transform" />
-                  </motion.a>
-                  <div className="mt-3 sm:mt-4 w-full text-center bg-white/5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl px-1 sm:px-2 overflow-hidden"><p className="text-[10.5px] min-[375px]:text-[11.5px] sm:text-[13px] text-slate-300 font-medium whitespace-nowrap tracking-tight sm:tracking-normal">{safeConfig.bottomNoticeText}</p></div>
-                </div>
-              </div>
-
-              {safeConfig.priceTableImage && (
-                <div id="section-price-table" className="mt-5 sm:mt-6 bg-white rounded-3xl sm:rounded-[2rem] p-3 sm:p-4 shadow-sm border border-slate-100 overflow-hidden scroll-mt-24">
-                   <h3 className="font-bold text-slate-800 mb-2 sm:mb-3 px-2 flex items-center gap-1.5 sm:gap-2 text-[15px] sm:text-base"><Calculator className="w-4 h-4 text-blue-500"/> 촬영 상품 가격표</h3>
-                   <img src={safeConfig.priceTableImage} alt="Price Table" className="w-full h-auto object-contain rounded-xl sm:rounded-2xl border border-slate-50" />
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* --- Moved Review & FAQ Sections (Below Frame Prices) --- */}
-        <div className="mt-8 sm:mt-12 space-y-6 sm:space-y-8">
-          {/* --- Review Slider Section --- */}
-          {safeConfig.reviewImages && safeConfig.reviewImages.length > 0 && (
-            <section id="section-reviews" className="bg-white rounded-3xl sm:rounded-[2rem] py-6 sm:py-10 shadow-sm border border-slate-100 overflow-hidden scroll-mt-24">
-              <div className="flex items-center justify-center gap-2 mb-8 sm:mb-10 px-5">
-                <Star className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-400 fill-yellow-400" />
-            </div>
-            
-            <div className="relative h-[460px] sm:h-[600px] w-full flex items-center justify-center touch-pan-y">
-              {safeConfig.reviewImages.map((img, i) => {
-                const offset = i - activeReviewSlide;
-                  // Limit rendering to nearby slides for performance
-                  if (Math.abs(offset) > 2) return null;
-
-                  return (
-                    <motion.div
-                      key={`review-slide-${i}`}
-                      drag="x"
-                      dragConstraints={{ left: 0, right: 0 }}
-                      dragElastic={0.2}
-                      onDragEnd={(e, info) => {
-                        if (info.offset.x < -50 && activeReviewSlide < safeConfig.reviewImages.length - 1) setActiveReviewSlide(prev => prev + 1);
-                        if (info.offset.x > 50 && activeReviewSlide > 0) setActiveReviewSlide(prev => prev - 1);
-                      }}
-                      initial={false}
-                      animate={{
-                        x: `calc(${offset * 105}%)`,
-                        scale: offset === 0 ? 1.1 : 0.9,
-                        opacity: offset === 0 ? 1 : Math.abs(offset) === 1 ? 0.5 : 0,
-                        filter: offset === 0 ? "blur(0px)" : "blur(2px)",
-                        zIndex: offset === 0 ? 10 : 5
-                      }}
-                      transition={{ duration: 0.35, ease: "easeInOut" }}
-                  onClick={() => {
-                    if (offset === 0) setLightboxIndex(i);
-                    else setActiveReviewSlide(i);
-                  }}
-                  className={`absolute w-[280px] sm:w-[380px] aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl cursor-pointer ${offset === 0 ? 'ring-2 ring-white/50' : ''}`}
-                >
-                  <img src={img} alt={`Review ${i}`} className="w-full h-full object-cover pointer-events-none bg-slate-50" draggable={false} />
-                </motion.div>
-                  )
-                })}
-              </div>
-              <div className="flex justify-center gap-2 mt-8">
-                {safeConfig.reviewImages.map((_, i) => (
-                  <div key={`dot-${i}`} className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${i === activeReviewSlide ? 'w-5 sm:w-6 bg-slate-800' : 'w-1.5 sm:w-2 bg-slate-200'}`} />
-                ))}
-              </div>
-              <p className="text-center text-xs sm:text-sm text-slate-400 mt-4 px-4 font-medium">사진을 넘겨보거나 중앙 사진을 클릭하여 확대해보세요.</p>
-            </section>
-          )}
-
-          {/* --- FAQ Section --- */}
-          {safeConfig.faqs && safeConfig.faqs.length > 0 && (
-            <section id="section-faq" className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100 scroll-mt-24">
-              <div className="flex items-center gap-2 sm:gap-3 mb-6 sm:mb-8">
-                <div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><HelpCircle className="w-4 h-4 sm:w-5 sm:h-5" /></div>
-                <h2 className="text-[17px] sm:text-xl font-bold text-slate-800">자주 묻는 질문</h2>
-              </div>
-              <div className="space-y-3 sm:space-y-4">
-                {safeConfig.faqs.map((faq, i) => (
-                  <div key={`faq-item-${i}`} className={`rounded-xl sm:rounded-2xl border transition-colors ${openFaq === i ? 'border-blue-500 bg-blue-50/30' : 'border-slate-200 bg-white hover:border-blue-300'}`}>
-                    <button 
-                      onClick={() => setOpenFaq(openFaq === i ? null : i)} 
-                      className="w-full px-4 py-4 sm:px-6 sm:py-5 text-left flex justify-between items-center gap-4"
-                    >
-                      <span className={`text-[14px] sm:text-[15px] font-bold leading-snug ${openFaq === i ? 'text-blue-700' : 'text-slate-800'}`}>
-                        <span className="text-blue-500 mr-2 font-black">Q.</span>{faq.question}
-                      </span>
-                      <motion.div animate={{ rotate: openFaq === i ? 180 : 0 }} className="flex-shrink-0 text-slate-400">
-                        <ChevronDown className="w-5 h-5 sm:w-6 sm:h-6" />
-                      </motion.div>
-                    </button>
-                    <AnimatePresence initial={false}>
-                      {openFaq === i && (
-                        <motion.div key={`faq-content-${i}`} initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.3 }} className="overflow-hidden">
-                          <div className="px-4 pb-4 sm:px-6 sm:pb-5 text-[13px] sm:text-[14px] text-slate-600 whitespace-pre-line leading-relaxed border-t border-slate-100/50 pt-3 sm:pt-4">
-                            <span className="text-slate-400 font-bold mr-2">A.</span>{faq.answer}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* --- Frame Price Section Moved Here --- */}
-          <section id="section-frame-prices" className="bg-white rounded-3xl sm:rounded-[2rem] p-5 sm:p-8 shadow-sm border border-slate-100 scroll-mt-24">
-            <div className="flex items-center gap-2 sm:gap-3 mb-5 sm:mb-6"><div className="p-2 sm:p-2.5 bg-blue-50 rounded-lg sm:rounded-xl text-blue-600"><ImagePlus className="w-4 h-4 sm:w-5 sm:h-5" /></div><h2 className="text-[17px] sm:text-xl font-bold text-slate-800">액자 가격표 참고</h2></div>
-            <div className="mb-5 sm:mb-6 text-center text-[10.5px] min-[375px]:text-[11.5px] sm:text-[14px] text-white font-bold bg-slate-900 py-2.5 sm:py-3 rounded-lg sm:rounded-xl px-1 shadow-inner whitespace-nowrap tracking-tight sm:tracking-normal overflow-hidden">모든 촬영상품엔 아크릴 우드 프레임이 포함되어있습니다.</div>
-            <div className="space-y-8 sm:space-y-10">
-              <div className="w-full">
-                <h3 className="text-[15px] sm:text-lg font-bold mb-3 sm:mb-4 text-slate-800 px-1">아크릴 우드 프레임 액자</h3>
-                <table className="w-full text-[11.5px] min-[375px]:text-[12px] sm:text-sm md:text-[15px] text-left border-collapse">
-                  <thead><tr className="border-b-2 border-slate-200"><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 whitespace-nowrap">R 규격</th><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 whitespace-nowrap">약 cm 사이즈</th><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 text-right whitespace-nowrap">가격</th></tr></thead>
-                  <tbody className="text-slate-700">
-                    {FRAME_SIZES.map((item, idx) => {
-                      const isDefault = isWoodDefault(item.id);
-                      return (
-                        <tr key={`wood-${item.id}`} className={idx !== FRAME_SIZES.length - 1 ? "border-b border-slate-100" : ""}>
-                          <td className={`py-3 sm:py-3.5 px-1 sm:px-2 font-semibold whitespace-nowrap ${isDefault ? 'text-red-500' : ''}`}>{item.label} {isDefault && <span className="text-[10px] sm:text-xs ml-0.5">(기본 제공)</span>}</td>
-                          <td className={`py-3 sm:py-3.5 px-1 sm:px-2 whitespace-nowrap ${isDefault ? 'text-red-500 font-semibold' : ''}`}>{item.cm}</td>
-                          <td className={`py-3 sm:py-3.5 px-1 sm:px-2 text-right whitespace-nowrap ${isDefault ? 'text-red-500 font-bold' : ''}`}>{formatCurrency(safeConfig.framePrices.wood[item.id])}원</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="pt-5 sm:pt-6 border-t-2 border-slate-100 w-full">
-                <h3 className="text-[15px] sm:text-lg font-bold mb-3 sm:mb-4 text-slate-800 px-1">아크릴 프레임 리스 액자</h3>
-                <table className="w-full text-[11.5px] min-[375px]:text-[12px] sm:text-sm md:text-[15px] text-left border-collapse">
-                  <thead><tr className="border-b-2 border-slate-200"><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 whitespace-nowrap">R 규격</th><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 whitespace-nowrap">약 cm 사이즈</th><th className="py-2.5 sm:py-3 px-1 sm:px-2 font-bold text-slate-500 text-right whitespace-nowrap">가격</th></tr></thead>
-                  <tbody className="text-slate-700">
-                    {FRAME_SIZES.map((item, idx) => (
-                      <tr key={`frameless-${item.id}`} className={idx !== FRAME_SIZES.length - 1 ? "border-b border-slate-100" : ""}>
-                        <td className="py-3 sm:py-3.5 px-1 sm:px-2 font-semibold whitespace-nowrap">{item.label}</td><td className="py-3 sm:py-3.5 px-1 sm:px-2 whitespace-nowrap">{item.cm}</td><td className="py-3 sm:py-3.5 px-1 sm:px-2 text-right whitespace-nowrap">{formatCurrency(safeConfig.framePrices.frameless[item.id])}원</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </section>
-
-          {/* --- Added Bottom Kakao Consultation Button --- */}
-          <div id="section-kakao" className="pt-2 sm:pt-4 flex justify-center pb-8 scroll-mt-24">
-            <motion.a whileTap={{ scale: 0.97 }} href={safeConfig.consultationLink} target="_blank" rel="noopener noreferrer" className="w-full max-w-lg py-4 sm:py-5 bg-[#FEE500] text-slate-900 rounded-2xl font-bold text-[15px] sm:text-[17px] hover:bg-[#FADA0A] transition-colors flex items-center justify-center gap-2 sm:gap-2.5 shadow-xl shadow-yellow-500/20">
-              <MessageSquare className="w-5 h-5 sm:w-6 sm:h-6" />
-              <span>{safeConfig.consultationText}</span>
-              <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6" />
-            </motion.a>
-          </div>
-        </div>
-
-        <div className="mt-8 sm:mt-10 mb-8 text-center">
-          <div className="inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 bg-white rounded-full text-[13px] sm:text-sm text-slate-500 shadow-sm border border-slate-200">
-            <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-500" />오늘 방문자 수 <strong className="text-slate-800 ml-0.5 sm:ml-1">{todayVisitors}</strong>명
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
 
 // 2. Admin Settings View
 function AdminSettingsView({ config, onSaveConfig }) {
-  const safeConfig = { ...DEFAULT_CONFIG, ...config, faqs: config.faqs || DEFAULT_CONFIG.faqs, reviewImages: config.reviewImages || [] };
+  const safeConfig = { 
+    ...DEFAULT_CONFIG, 
+    ...config, 
+    faqs: config.faqs || DEFAULT_CONFIG.faqs, 
+    reviewImages: config.reviewImages || [],
+    blogFolders: config.blogFolders || DEFAULT_CONFIG.blogFolders,
+    blogTitle: config.blogTitle || DEFAULT_CONFIG.blogTitle,
+    blogSubtitle: config.blogSubtitle || DEFAULT_CONFIG.blogSubtitle,
+  };
   const [localConfig, setLocalConfig] = useState(safeConfig);
   const [showToast, setShowToast] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => { setLocalConfig({ ...DEFAULT_CONFIG, ...config, faqs: config.faqs || DEFAULT_CONFIG.faqs, reviewImages: config.reviewImages || [] }); }, [config]);
+  useEffect(() => { setLocalConfig({ ...DEFAULT_CONFIG, ...config, faqs: config.faqs || DEFAULT_CONFIG.faqs, reviewImages: config.reviewImages || [], blogFolders: config.blogFolders || DEFAULT_CONFIG.blogFolders, blogTitle: config.blogTitle || DEFAULT_CONFIG.blogTitle, blogSubtitle: config.blogSubtitle || DEFAULT_CONFIG.blogSubtitle }); }, [config]);
 
   const handlePriceChange = (product, date, value) => {
     setLocalConfig(prev => ({...prev, prices: {...prev.prices, [product]: { ...prev.prices[product], [date]: Number(value) }}}));
@@ -692,7 +932,7 @@ function AdminSettingsView({ config, onSaveConfig }) {
     setLocalConfig(prev => ({...prev, framePrices: {...prev.framePrices, [type]: { ...prev.framePrices[type], [size]: Number(value) }}}));
   };
 
-  const handleImageUpload = (e, type) => {
+  const handleImageUpload = (e, type, folderId = null, postId = null) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -701,8 +941,7 @@ function AdminSettingsView({ config, onSaveConfig }) {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        // Set max width based on usage to prevent DB overload. Review images don't need to be huge.
-        const MAX_WIDTH = type === 'priceTable' ? 1200 : type === 'review' ? 600 : 800; 
+        const MAX_WIDTH = type === 'priceTable' ? 1200 : type === 'review' ? 600 : type === 'blog' ? 400 : 800; 
         const scaleSize = MAX_WIDTH / img.width;
         canvas.width = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
         canvas.height = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
@@ -714,6 +953,15 @@ function AdminSettingsView({ config, onSaveConfig }) {
         else if (type === 'review') setLocalConfig(prev => ({ ...prev, reviewImages: [...prev.reviewImages, base64] }));
         else if (type === 'popup') setLocalConfig(prev => ({ ...prev, popupImage: base64 }));
         else if (type === 'priceTable') setLocalConfig(prev => ({ ...prev, priceTableImage: base64 }));
+        else if (type === 'blog') {
+          setLocalConfig(prev => ({
+            ...prev,
+            blogFolders: prev.blogFolders.map(f => f.id === folderId ? { 
+              ...f, 
+              posts: f.posts.map(p => p.id === postId ? { ...p, thumbnail: base64 } : p) 
+            } : f)
+          }));
+        }
       };
     };
     reader.readAsDataURL(file);
@@ -736,15 +984,29 @@ function AdminSettingsView({ config, onSaveConfig }) {
     newFaqs[index][field] = value;
     setLocalConfig({ ...localConfig, faqs: newFaqs });
   };
-
-  const addFaq = () => {
-    setLocalConfig({ ...localConfig, faqs: [...localConfig.faqs, { question: "", answer: "" }] });
-  };
-
+  const addFaq = () => setLocalConfig({ ...localConfig, faqs: [...localConfig.faqs, { question: "", answer: "" }] });
   const removeFaq = (index) => {
     const newFaqs = [...localConfig.faqs];
     newFaqs.splice(index, 1);
     setLocalConfig({ ...localConfig, faqs: newFaqs });
+  };
+
+  // --- Blog Management Methods ---
+  const addBlogFolder = () => {
+    const newFolder = { id: `folder_${Date.now()}`, title: "새로운 카테고리", posts: [] };
+    setLocalConfig(prev => ({ ...prev, blogFolders: [...prev.blogFolders, newFolder] }));
+  };
+  const removeBlogFolder = (id) => setLocalConfig(prev => ({ ...prev, blogFolders: prev.blogFolders.filter(f => f.id !== id) }));
+  
+  const addBlogPost = (folderId) => {
+    const newPost = { id: `post_${Date.now()}`, title: "새로운 블로그 글", date: new Date().toLocaleDateString().replace(/\s/g, ''), tags: [], thumbnail: "", link: "" };
+    setLocalConfig(prev => ({ ...prev, blogFolders: prev.blogFolders.map(f => f.id === folderId ? { ...f, posts: [...f.posts, newPost] } : f) }));
+  };
+  const updateBlogPost = (folderId, postId, fields) => {
+    setLocalConfig(prev => ({ ...prev, blogFolders: prev.blogFolders.map(f => f.id === folderId ? { ...f, posts: f.posts.map(p => p.id === postId ? { ...p, ...fields } : p) } : f) }));
+  };
+  const removeBlogPost = (folderId, postId) => {
+    setLocalConfig(prev => ({ ...prev, blogFolders: prev.blogFolders.map(f => f.id === folderId ? { ...f, posts: f.posts.filter(p => p.id !== postId) } : f) }));
   };
 
   const saveSettings = async () => {
@@ -759,13 +1021,108 @@ function AdminSettingsView({ config, onSaveConfig }) {
     <div className="max-w-5xl mx-auto p-4 sm:p-8 space-y-8 sm:space-y-12 relative pb-32">
       <AnimatePresence>
         {showToast && (
-          <motion.div key="toast-success" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="fixed top-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 sm:gap-3 bg-slate-900 text-white px-5 sm:px-6 py-3 sm:py-4 rounded-full shadow-2xl font-medium text-sm sm:text-base whitespace-nowrap">
+          <motion.div key="toast-success" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="fixed top-8 left-1/2 -translate-x-1/2 z-[3000] flex items-center gap-2 sm:gap-3 bg-slate-900 text-white px-5 sm:px-6 py-3 sm:py-4 rounded-full shadow-2xl font-medium text-sm sm:text-base whitespace-nowrap">
             <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" />설정이 성공적으로 저장되었습니다.
           </motion.div>
         )}
       </AnimatePresence>
 
-      <div><h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">환경설정</h2><p className="text-slate-500 text-sm sm:text-base">앱의 텍스트, 버튼, 가격, 사진을 실시간으로 데이터베이스에 저장합니다.</p></div>
+      <div><h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">환경설정</h2><p className="text-slate-500 text-sm sm:text-base">앱의 텍스트, 버튼, 가격, 사진, 블로그를 관리합니다.</p></div>
+
+      {/* --- Blog Management Section --- */}
+      <section className="bg-white p-5 sm:p-8 rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200">
+        <h3 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center justify-between mb-6 sm:mb-8">
+          <div className="flex items-center gap-2"><Folder className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" /> 블로그 모드 관리</div>
+          <button onClick={addBlogFolder} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 font-bold rounded-lg text-sm hover:bg-slate-200 transition-colors">
+            <Plus className="w-4 h-4" /> 카테고리(폴더) 추가
+          </button>
+        </h3>
+
+        {/* 블로그 메인 헤더 타이틀 설정 */}
+        <div className="mb-8 p-4 sm:p-6 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
+          <h4 className="font-bold text-slate-700 text-sm">블로그 메인 화면 문구 설정</h4>
+          <div className="space-y-3">
+             <div>
+               <label className="text-xs text-slate-500 font-bold mb-1 block">메인 타이틀</label>
+               <input value={localConfig.blogTitle} onChange={e => setLocalConfig({...localConfig, blogTitle: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 font-bold" placeholder="Vignette Journal" />
+             </div>
+             <div>
+               <label className="text-xs text-slate-500 font-bold mb-1 block">서브 타이틀</label>
+               <input value={localConfig.blogSubtitle} onChange={e => setLocalConfig({...localConfig, blogSubtitle: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 text-sm" placeholder="비뉴뜨만의 따뜻한 촬영 기록과 정보를 만나보세요." />
+             </div>
+          </div>
+        </div>
+
+        <div className="space-y-6 sm:space-y-8">
+          {localConfig.blogFolders.map((folder, fIndex) => (
+            <div key={folder.id} className="p-4 sm:p-6 bg-slate-50 rounded-2xl border border-slate-200 relative">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 sm:mb-6 border-b border-slate-200 pb-4">
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <span className="text-slate-400 font-bold text-sm bg-white px-2 py-1 rounded shadow-sm border border-slate-100">{fIndex + 1}</span>
+                  <input 
+                    value={folder.title} 
+                    onChange={(e) => setLocalConfig(prev => ({ ...prev, blogFolders: prev.blogFolders.map(f => f.id === folder.id ? { ...f, title: e.target.value } : f) }))}
+                    className="flex-1 bg-white px-3 py-2 text-[15px] sm:text-lg font-bold outline-none border border-slate-200 rounded-lg focus:border-blue-500 transition-colors shadow-sm"
+                    placeholder="폴더 이름 입력"
+                  />
+                </div>
+                <button onClick={() => removeBlogFolder(folder.id)} className="self-end sm:self-auto p-2 text-slate-400 hover:text-red-500 hover:bg-white rounded-lg transition-colors flex gap-1 items-center text-xs font-bold"><Trash2 className="w-4 h-4" /> 폴더 삭제</button>
+              </div>
+
+              <div className="space-y-4">
+                {folder.posts.map((post, pIndex) => (
+                  <div key={post.id} className="bg-white p-4 sm:p-5 rounded-xl shadow-sm border border-slate-100 flex flex-col sm:flex-row gap-4 relative group">
+                    <button onClick={() => removeBlogPost(folder.id, post.id)} className="absolute top-3 right-3 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"><X className="w-4 h-4" /></button>
+                    
+                    {/* Thumbnail Upload */}
+                    <div className="w-full sm:w-32 h-32 sm:h-32 bg-slate-100 rounded-lg flex-shrink-0 relative overflow-hidden border border-slate-200">
+                      {post.thumbnail ? (
+                        <>
+                          <img src={post.thumbnail} className="w-full h-full object-cover" alt="thumbnail" />
+                          <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white text-xs font-bold">
+                            변경<input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'blog', folder.id, post.id)} />
+                          </label>
+                        </>
+                      ) : (
+                        <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-colors">
+                          <ImagePlus className="w-6 h-6 mb-1" /><span className="text-[10px] font-bold">썸네일</span>
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'blog', folder.id, post.id)} />
+                        </label>
+                      )}
+                    </div>
+                    
+                    {/* Content Inputs */}
+                    <div className="flex-1 flex flex-col gap-2.5">
+                      <div className="flex gap-2 pr-6">
+                        <span className="text-xs font-bold text-slate-400 w-8 pt-2">제목</span>
+                        <input value={post.title} onChange={(e) => updateBlogPost(folder.id, post.id, { title: e.target.value })} className="flex-1 font-bold outline-none text-[14px] sm:text-[15px] border-b border-transparent focus:border-blue-500 pb-1" placeholder="글 제목 입력" />
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2.5">
+                        <div className="flex gap-2 flex-1">
+                          <span className="text-xs font-bold text-slate-400 w-8 pt-2">링크</span>
+                          <input value={post.link} onChange={(e) => updateBlogPost(folder.id, post.id, { link: e.target.value })} className="flex-1 text-xs bg-slate-50 p-2 rounded outline-none border border-slate-200 focus:border-blue-500" placeholder="https://blog.naver.com/..." />
+                        </div>
+                        <div className="flex gap-2 sm:w-1/3">
+                           <span className="text-xs font-bold text-slate-400 w-8 pt-2 sm:w-auto">날짜</span>
+                           <input value={post.date} onChange={(e) => updateBlogPost(folder.id, post.id, { date: e.target.value })} className="flex-1 text-xs bg-slate-50 p-2 rounded outline-none border border-slate-200 focus:border-blue-500" placeholder="2026.01.23." />
+                        </div>
+                      </div>
+                      <div className="flex gap-2 items-start mt-1">
+                         <span className="text-xs font-bold text-slate-400 w-8 pt-2.5">태그</span>
+                         <TagEditor tags={post.tags} onChange={(newTags) => updateBlogPost(folder.id, post.id, { tags: newTags })} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <button onClick={() => addBlogPost(folder.id)} className="w-full py-3 sm:py-4 border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl text-slate-500 font-bold hover:text-blue-600 hover:bg-blue-50 transition-colors text-sm flex items-center justify-center gap-2">
+                  <Plus className="w-4 h-4" /> 블로그 글 추가
+                </button>
+              </div>
+            </div>
+          ))}
+          {localConfig.blogFolders.length === 0 && <p className="text-center text-slate-400 py-4 text-sm font-medium">폴더를 추가하여 블로그 리스트를 구성해보세요.</p>}
+        </div>
+      </section>
 
       {/* 1. Image Settings */}
       <section className="bg-white p-5 sm:p-8 rounded-3xl sm:rounded-[2rem] shadow-sm border border-slate-200">
@@ -939,7 +1296,7 @@ function AdminSettingsView({ config, onSaveConfig }) {
       </section>
 
       {/* Floating Save Bar */}
-      <div className="fixed sm:sticky bottom-4 sm:bottom-4 left-4 right-4 sm:left-0 sm:right-0 bg-white/95 backdrop-blur-md p-3 sm:p-4 rounded-2xl shadow-2xl border border-slate-200 flex flex-col sm:flex-row justify-end items-center gap-3 sm:gap-4 z-40">
+      <div className="fixed sm:sticky bottom-4 sm:bottom-4 left-4 right-4 sm:left-0 sm:right-0 bg-white/95 backdrop-blur-md p-3 sm:p-4 rounded-2xl shadow-2xl border border-slate-200 flex flex-col sm:flex-row justify-end items-center gap-3 sm:gap-4 z-[2500]">
         <button onClick={() => setLocalConfig(safeConfig)} className="w-full sm:w-auto px-5 sm:px-6 py-3 sm:py-3.5 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors text-sm sm:text-base">설정 초기화</button>
         <motion.button whileTap={{ scale: 0.95 }} onClick={saveSettings} disabled={isSaving} className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 sm:px-8 py-3.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/30 text-base sm:text-lg disabled:opacity-50">
           {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />} 
@@ -1166,7 +1523,7 @@ function AdminLoginView({ onLogin }) {
   );
 }
 
-// 5. 완벽한 에러 감지기 (ErrorBoundary) 추가 - 하얀 화면 방지
+// 5. 완벽한 에러 감지기 (ErrorBoundary)
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -1212,13 +1569,15 @@ function MainApp() {
   const [isDbReady, setIsDbReady] = useState(false);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   
+  // Blog Mode Global State
+  const [isBlogMode, setBlogMode] = useState(false);
+  
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [visits, setVisits] = useState([]);
   const [estimates, setEstimates] = useState([]);
 
   useEffect(() => {
     if (!auth) {
-      console.warn("Auth is not initialized. Skipping Firebase Auth.");
       setIsDbReady(true);
       return;
     }
@@ -1230,15 +1589,12 @@ function MainApp() {
           await signInAnonymously(auth);
         }
       } catch(e) { 
-        console.error("Auth error", e); 
-        // 인증에 실패하더라도 무조건 데이터를 볼 수 있도록 강제 통과 처리
         setIsDbReady(true);
       }
     };
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      // 인증 성공 여부와 상관없이 무조건 앱을 렌더링 시킵니다.
       setIsDbReady(true);
     });
     return () => unsubscribe();
@@ -1301,7 +1657,7 @@ function MainApp() {
   }
 
   // 고객용 뷰 (클라이언트 모드)
-  if (isClientMode) return <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} />;
+  if (isClientMode) return <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} isBlogMode={isBlogMode} setBlogMode={setBlogMode} />;
 
   // 관리자 모드 접속 시, 로그인 확인
   if (!isAdminAuthenticated) {
@@ -1359,7 +1715,7 @@ function MainApp() {
         <AnimatePresence mode="wait">
           {activeTab === "preview" && (
             <motion.div key="preview" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
-              <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} />
+              <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} isBlogMode={isBlogMode} setBlogMode={setBlogMode} />
             </motion.div>
           )}
           {activeTab === "settings" && (
