@@ -891,25 +891,74 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
               key="sheet-content"
               initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed bottom-0 left-0 right-0 h-[92vh] sm:h-[85vh] max-w-3xl mx-auto bg-white rounded-t-[2rem] z-[2010] shadow-2xl overflow-hidden flex flex-col"
+              className="fixed bottom-0 left-0 right-0 h-[85vh] sm:h-[80vh] max-w-2xl mx-auto bg-white rounded-t-[2.5rem] z-[2010] shadow-2xl flex flex-col overflow-hidden"
             >
-              <div className="pt-4 sm:pt-5 pb-3 flex items-center justify-center relative bg-white z-20">
+              {/* 상단 닫기 핸들 */}
+              <div className="pt-4 sm:pt-5 pb-3 flex items-center justify-center relative bg-white z-20 flex-shrink-0">
                 <div className="w-12 h-1.5 bg-slate-200 hover:bg-slate-300 transition-colors rounded-full cursor-grab active:cursor-grabbing" onClick={() => setSelectedPost(null)} />
               </div>
               
               <button 
                 onClick={() => setSelectedPost(null)} 
-                className="absolute top-3 right-3 sm:top-4 sm:right-4 p-2 sm:p-2.5 bg-slate-100 rounded-full text-slate-500 hover:text-slate-800 hover:bg-slate-200 transition-colors z-[2050]"
+                className="absolute top-4 right-4 sm:top-5 sm:right-5 p-2 bg-slate-100/80 backdrop-blur-md rounded-full text-slate-500 hover:text-slate-800 hover:bg-slate-200 transition-colors z-[2050]"
               >
                 <X className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2.5} />
               </button>
 
-              <div className="flex-1 bg-white relative overflow-hidden">
-                <iframe src={selectedPost.link} className="w-full h-full border-none relative z-10 bg-white" title="Blog Post" sandbox="allow-scripts allow-same-origin allow-popups" />
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none opacity-40 z-0">
-                   <Loader2 className="w-8 h-8 animate-spin mb-2" />
-                   <p className="text-slate-900 font-bold text-sm">콘텐츠를 불러오는 중입니다...</p>
+              {/* 안내 컨텐츠 뷰 (iframe 대체) */}
+              <div className="flex-1 overflow-y-auto bg-slate-50 px-5 sm:px-8 pt-4 pb-28">
+                <div className="max-w-xl mx-auto">
+                  {selectedPost.thumbnail ? (
+                    <div className="w-full max-w-md mx-auto aspect-square rounded-2xl overflow-hidden shadow-sm mb-6 border border-slate-200 bg-white">
+                      <img src={selectedPost.thumbnail} className="w-full h-full object-cover" alt={selectedPost.title} />
+                    </div>
+                  ) : (
+                    <div className="w-full max-w-md mx-auto aspect-square bg-slate-200 rounded-2xl flex flex-col items-center justify-center mb-6 border border-slate-300">
+                      <ImagePlus className="w-12 h-12 text-slate-400 mb-2" />
+                      <span className="text-slate-500 text-sm font-medium">등록된 이미지가 없습니다</span>
+                    </div>
+                  )}
+                  
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {selectedPost.tags?.map((t, idx) => {
+                      const isObj = typeof t === 'object';
+                      const text = isObj ? t.text : t;
+                      const color = isObj ? t.color : (idx % 2 === 0 ? "bg-red-500" : "bg-blue-600");
+                      return <span key={isObj ? t.id : idx} className={`${color} text-white text-[11px] font-bold px-2.5 py-1 rounded-md shadow-sm`}>{text}</span>;
+                    })}
+                  </div>
+                  
+                  <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mb-3 leading-snug tracking-tight">{selectedPost.title}</h3>
+                  <div className="text-sm text-slate-500 font-medium mb-8 flex items-center gap-1.5">
+                    <Calendar className="w-4 h-4" /> {selectedPost.date}
+                  </div>
+                  
+                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm text-center space-y-4">
+                    <div className="w-14 h-14 bg-blue-50 rounded-full flex items-center justify-center mx-auto">
+                      <ExternalLink className="w-7 h-7 text-blue-500" />
+                    </div>
+                    <div>
+                      <p className="text-slate-800 text-[15px] sm:text-[16px] font-bold mb-1">
+                        안전한 브라우저 환경에서 원문을 제공합니다.
+                      </p>
+                      <p className="text-slate-500 text-[13px] sm:text-[14px] leading-relaxed">
+                        블로그 보안 정책 상 앱 내에서 본문이 직접 노출되지 않습니다.<br className="hidden sm:block"/>
+                        아래 버튼을 눌러 원문을 확인해주세요!
+                      </p>
+                    </div>
+                  </div>
                 </div>
+              </div>
+
+              {/* 고정 이동 버튼 */}
+              <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 bg-white/95 backdrop-blur-md border-t border-slate-100 z-30">
+                <button 
+                  onClick={() => window.open(selectedPost.link, '_blank')}
+                  className="w-full max-w-xl mx-auto py-4 bg-blue-600 text-white font-bold rounded-xl text-[16px] sm:text-[17px] flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/20 active:scale-[0.98]"
+                >
+                  <FileText className="w-5 h-5" />
+                  블로그 원문 읽으러 가기 <ArrowRight className="w-5 h-5 opacity-70" />
+                </button>
               </div>
             </motion.div>
           </>
@@ -981,13 +1030,21 @@ function AdminSettingsView({ config, onSaveConfig, images }) {
       img.src = event.target.result;
       img.onload = async () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = type === 'priceTable' ? 1200 : type === 'review' ? 600 : type === 'blog' ? 400 : 800; 
+        // 변경 전: const MAX_WIDTH = type === 'priceTable' ? 1200 : type === 'review' ? 600 : type === 'blog' ? 400 : 800;
+        // 변경 후: 모든 이미지, 특히 블로그 이미지의 화질을 대폭 상향 (최소 1000px 유지)
+        const MAX_WIDTH = type === 'priceTable' ? 1600 : type === 'review' ? 1000 : type === 'blog' ? 1000 : 1200; 
         const scaleSize = MAX_WIDTH / img.width;
         canvas.width = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
         canvas.height = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
         const ctx = canvas.getContext('2d');
+        
+        // 부드러운 이미지 스케일링을 위해 옵션 추가
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const base64 = canvas.toDataURL('image/jpeg', 0.8); 
+        
+        // JPEG 압축률을 0.8에서 0.95로 상향하여 고화질 유지
+        const base64 = canvas.toDataURL('image/jpeg', 0.95); 
         
         try {
           // Firestore의 images 컬렉션에 1장씩 분리 저장
