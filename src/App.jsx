@@ -534,13 +534,11 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
             <section id="section-reviews" className="bg-white rounded-3xl sm:rounded-[2rem] py-6 sm:py-10 shadow-sm border border-slate-100 overflow-hidden scroll-mt-24">
               <div className="flex items-center justify-center gap-2 mb-8 sm:mb-10 px-5">
                 <Star className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-400 fill-yellow-400" />
-                <h2 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">리뷰</h2>
-                <Star className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-400 fill-yellow-400" />
-              </div>
-              
-              <div className="relative h-[400px] sm:h-[500px] w-full flex items-center justify-center touch-pan-y">
-                {safeConfig.reviewImages.map((img, i) => {
-                  const offset = i - activeReviewSlide;
+            </div>
+            
+            <div className="relative h-[460px] sm:h-[600px] w-full flex items-center justify-center touch-pan-y">
+              {safeConfig.reviewImages.map((img, i) => {
+                const offset = i - activeReviewSlide;
                   // Limit rendering to nearby slides for performance
                   if (Math.abs(offset) > 2) return null;
 
@@ -563,14 +561,14 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
                         zIndex: offset === 0 ? 10 : 5
                       }}
                       transition={{ duration: 0.35, ease: "easeInOut" }}
-                      onClick={() => {
-                        if (offset === 0) setLightboxIndex(i);
-                        else setActiveReviewSlide(i);
-                      }}
-                      className={`absolute w-[240px] sm:w-[320px] aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl cursor-pointer ${offset === 0 ? 'ring-2 ring-white/50' : ''}`}
-                    >
-                      <img src={img} alt={`Review ${i}`} className="w-full h-full object-cover pointer-events-none bg-slate-50" draggable={false} />
-                    </motion.div>
+                  onClick={() => {
+                    if (offset === 0) setLightboxIndex(i);
+                    else setActiveReviewSlide(i);
+                  }}
+                  className={`absolute w-[280px] sm:w-[380px] aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl cursor-pointer ${offset === 0 ? 'ring-2 ring-white/50' : ''}`}
+                >
+                  <img src={img} alt={`Review ${i}`} className="w-full h-full object-cover pointer-events-none bg-slate-50" draggable={false} />
+                </motion.div>
                   )
                 })}
               </div>
