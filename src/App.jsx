@@ -155,7 +155,6 @@ const BouncyTag = ({ text, colorClass = "bg-red-500" }) => (
   </motion.span>
 );
 
-// 단일 알약(Pill) 형태의 전환 토글 컴포넌트
 const ModeToggle = ({ isBlogMode, onToggle }) => (
   <motion.button
     whileTap={{ scale: 0.95 }}
@@ -393,7 +392,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
   return (
     <div className={`min-h-screen transition-colors duration-500 font-sans pb-24 relative overflow-x-hidden pt-[56px] sm:pt-[60px] ${isBlogMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
       
-      {/* 1. Top Navigation Bar - 구조 개선하여 겹침 현상 방지 */}
+      {/* 1. Top Navigation Bar */}
       <header className={`fixed top-0 left-0 right-0 h-[56px] sm:h-[60px] z-[90] flex items-center justify-between px-3 sm:px-5 border-b backdrop-blur-[16px] transition-colors duration-500 ${isBlogMode ? 'bg-slate-950/80 border-slate-800 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.5)]' : 'bg-white/95 border-slate-100 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]'}`}>
         <div className="flex-shrink-0 w-10 sm:w-12">
           <button 
@@ -404,7 +403,6 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
           </button>
         </div>
 
-        {/* 중앙 제목: 절대 위치를 사용하되 max-width와 truncate를 주어 버튼과 겹침 방지 */}
         <h1 className={`text-[15px] sm:text-[18px] font-bold absolute left-1/2 -translate-x-1/2 tracking-tight whitespace-nowrap max-w-[40%] overflow-hidden truncate text-center ${isBlogMode ? 'text-white' : 'text-slate-900'}`}>
           비뉴뜨 견적계산기
         </h1>
@@ -428,7 +426,6 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
             
             <div className="p-3 flex-1 flex flex-col gap-1.5 overflow-y-auto">
               {isBlogMode ? (
-                /* --- Blog Sidebar Tree --- */
                 safeConfig.blogFolders.map(folder => (
                   <div key={folder.id} className="flex flex-col mb-1">
                     <button 
@@ -461,7 +458,6 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
                   </div>
                 ))
               ) : (
-                /* --- Calculator Sidebar Menus --- */
                 SIDEBAR_MENUS.map(menu => {
                   const isActive = activeSection === menu.id;
                   const IconComponent = menu.icon; 
@@ -672,7 +668,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
                         )
                       })}
                     </div>
-                    <div className="flex justify-center gap-2 mt-8">
+                    <div className="flex justify-center gap-2 mt-8 flex-wrap px-4">
                       {safeConfig.reviewImages.map((_, i) => (
                         <div key={`dot-${i}`} className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${i === activeReviewSlide ? 'w-5 sm:w-6 bg-slate-800' : 'w-1.5 sm:w-2 bg-slate-200'}`} />
                       ))}
@@ -934,10 +930,17 @@ function AdminSettingsView({ config, onSaveConfig }) {
     blogSubtitle: config.blogSubtitle || DEFAULT_CONFIG.blogSubtitle,
   };
   const [localConfig, setLocalConfig] = useState(safeConfig);
-  const [showToast, setShowToast] = useState(false);
+  const [toastInfo, setToastInfo] = useState({ show: false, isError: false, message: "" });
   const [isSaving, setIsSaving] = useState(false);
+  const [configSize, setConfigSize] = useState(0);
 
   useEffect(() => { setLocalConfig({ ...DEFAULT_CONFIG, ...config, faqs: config.faqs || DEFAULT_CONFIG.faqs, reviewImages: config.reviewImages || [], blogFolders: config.blogFolders || DEFAULT_CONFIG.blogFolders, blogTitle: config.blogTitle || DEFAULT_CONFIG.blogTitle, blogSubtitle: config.blogSubtitle || DEFAULT_CONFIG.blogSubtitle }); }, [config]);
+
+  useEffect(() => {
+    // 설정 데이터의 대략적인 바이트 크기 계산 (DB 1MB 제한 확인용)
+    const size = new Blob([JSON.stringify(localConfig)]).size;
+    setConfigSize(size);
+  }, [localConfig]);
 
   const handlePriceChange = (product, date, value) => {
     setLocalConfig(prev => ({...prev, prices: {...prev.prices, [product]: { ...prev.prices[product], [date]: Number(value) }}}));
@@ -955,13 +958,36 @@ function AdminSettingsView({ config, onSaveConfig }) {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = type === 'priceTable' ? 1200 : type === 'review' ? 600 : type === 'blog' ? 400 : 800; 
+        
+        // --- 🚀 이미지 최적화 로직 적용 (해상도 및 화질 대폭 상향) ---
+        let MAX_WIDTH = 800;
+        let quality = 0.8; // 화질 80%로 상향
+
+        if (type === 'priceTable') { MAX_WIDTH = 1200; quality = 0.85; }
+        else if (type === 'review') { MAX_WIDTH = 800; quality = 0.8; } // 해상도 800px로 상향 (기존 450px)
+        else if (type === 'blog') { MAX_WIDTH = 800; quality = 0.8; }
+        else if (type === 'slider') { MAX_WIDTH = 1000; quality = 0.85; }
+        else if (type === 'popup') { MAX_WIDTH = 400; quality = 0.8; }
+
         const scaleSize = MAX_WIDTH / img.width;
-        canvas.width = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
-        canvas.height = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
+        let targetWidth = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
+        let targetHeight = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
+
+        // 세로가 비정상적으로 긴 사진 방지
+        const MAX_HEIGHT = 1500;
+        if (targetHeight > MAX_HEIGHT) {
+            const heightScale = MAX_HEIGHT / targetHeight;
+            targetHeight = MAX_HEIGHT;
+            targetWidth = targetWidth * heightScale;
+        }
+
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const base64 = canvas.toDataURL('image/jpeg', 0.8); 
+        
+        // jpeg 포맷과 조절된 퀄리티로 Base64 생성
+        const base64 = canvas.toDataURL('image/jpeg', quality); 
         
         if (type === 'slider') setLocalConfig(prev => ({ ...prev, sliderImages: [...prev.sliderImages, base64] }));
         else if (type === 'review') setLocalConfig(prev => ({ ...prev, reviewImages: [...prev.reviewImages, base64] }));
@@ -1024,19 +1050,36 @@ function AdminSettingsView({ config, onSaveConfig }) {
   };
 
   const saveSettings = async () => {
+    if (configSize > 1048576) {
+      setToastInfo({ show: true, isError: true, message: "저장 실패! 데이터가 1MB를 초과했습니다. 고화질 사진 개수를 줄여주세요." });
+      setTimeout(() => setToastInfo(prev => ({ ...prev, show: false })), 4000);
+      return;
+    }
+
     setIsSaving(true);
-    await onSaveConfig(localConfig);
+    try {
+      await onSaveConfig(localConfig);
+      setToastInfo({ show: true, isError: false, message: "설정이 성공적으로 저장되었습니다." });
+    } catch (e) {
+      setToastInfo({ show: true, isError: true, message: "저장 실패! 데이터 용량을 초과했습니다. 사진 개수나 해상도를 줄여주세요 (DB 1MB 제한)." });
+    }
     setIsSaving(false);
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 3000);
+    setTimeout(() => setToastInfo(prev => ({ ...prev, show: false })), 4000);
   };
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-8 space-y-8 sm:space-y-12 relative pb-32">
       <AnimatePresence>
-        {showToast && (
-          <motion.div key="toast-success" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="fixed top-8 left-1/2 -translate-x-1/2 z-[3000] flex items-center gap-2 sm:gap-3 bg-slate-900 text-white px-5 sm:px-6 py-3 sm:py-4 rounded-full shadow-2xl font-medium text-sm sm:text-base whitespace-nowrap">
-            <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" />설정이 성공적으로 저장되었습니다.
+        {toastInfo.show && (
+          <motion.div 
+            key="toast-msg" 
+            initial={{ opacity: 0, y: -20 }} 
+            animate={{ opacity: 1, y: 0 }} 
+            exit={{ opacity: 0, y: -20 }} 
+            className={`fixed top-8 left-1/2 -translate-x-1/2 z-[3000] flex items-center gap-2 sm:gap-3 px-5 sm:px-6 py-3 sm:py-4 rounded-full shadow-2xl font-medium text-sm sm:text-base whitespace-nowrap ${toastInfo.isError ? 'bg-red-600 text-white' : 'bg-slate-900 text-white'}`}
+          >
+            {toastInfo.isError ? <X className="w-5 h-5 text-white" /> : <CheckCircle className="w-5 h-5 text-green-400" />}
+            {toastInfo.message}
           </motion.div>
         )}
       </AnimatePresence>
@@ -1161,7 +1204,7 @@ function AdminSettingsView({ config, onSaveConfig }) {
           
           <div>
             <label className="flex items-center gap-2 text-[15px] sm:text-base font-bold text-slate-800 mb-3 sm:mb-4"><span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[11px] sm:text-xs">3:4 세로 비율</span> 리뷰 슬라이더 사진</label>
-            <p className="text-[12px] sm:text-sm text-slate-500 mb-4">화면 하단 리뷰 슬라이더에 표시될 세로형 사진들을 업로드하세요.</p>
+            <p className="text-[12px] sm:text-sm text-slate-500 mb-4">화면 하단 리뷰 슬라이더에 표시될 세로형 사진들을 여러 장 업로드하세요. (최적화가 적용되어 10장 이상도 저장됩니다.)</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
               {localConfig.reviewImages.map((img, idx) => (
                 <div key={`admin-review-${idx}`} className="relative aspect-[3/4] rounded-xl sm:rounded-2xl overflow-hidden border border-slate-200 group bg-slate-50">
@@ -1311,8 +1354,20 @@ function AdminSettingsView({ config, onSaveConfig }) {
 
       {/* Floating Save Bar */}
       <div className="fixed sm:sticky bottom-4 sm:bottom-4 left-4 right-4 sm:left-0 sm:right-0 bg-white/95 backdrop-blur-md p-3 sm:p-4 rounded-2xl shadow-2xl border border-slate-200 flex flex-col sm:flex-row justify-end items-center gap-3 sm:gap-4 z-[2500]">
+        
+        {/* DB 용량 게이지 바 추가 */}
+        <div className="hidden sm:flex flex-col flex-1 w-full max-w-xs mr-auto pl-2">
+          <div className="flex justify-between text-[11px] sm:text-xs font-bold mb-1.5">
+            <span className={configSize > 1048576 ? "text-red-500" : "text-slate-500"}>DB 저장 용량 (최대 1MB)</span>
+            <span className={configSize > 1048576 ? "text-red-500" : "text-blue-600"}>{(configSize / (1024 * 1024)).toFixed(2)} MB / 1.0 MB</span>
+          </div>
+          <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+            <div className={`h-full transition-all duration-300 ${configSize > 1048576 ? "bg-red-500" : configSize > 800000 ? "bg-orange-400" : "bg-blue-500"}`} style={{ width: `${Math.min((configSize / 1048576) * 100, 100)}%` }} />
+          </div>
+        </div>
+        
         <button onClick={() => setLocalConfig(safeConfig)} className="w-full sm:w-auto px-5 sm:px-6 py-3 sm:py-3.5 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors text-sm sm:text-base">설정 초기화</button>
-        <motion.button whileTap={{ scale: 0.95 }} onClick={saveSettings} disabled={isSaving} className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 sm:px-8 py-3.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/30 text-base sm:text-lg disabled:opacity-50">
+        <motion.button whileTap={{ scale: 0.95 }} onClick={saveSettings} disabled={isSaving || configSize > 1048576} className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 sm:px-8 py-3.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/30 text-base sm:text-lg disabled:opacity-50 disabled:cursor-not-allowed">
           {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />} 
           데이터베이스에 저장
         </motion.button>
@@ -1651,12 +1706,17 @@ function MainApp() {
 
   const saveConfigToDB = async (newConfig) => {
     if (!db) return;
-    try { await setDoc(doc(db, getPath('config'), 'main'), newConfig); } 
-    catch (e) { console.error("Save config error:", e); }
+    try { 
+      await setDoc(doc(db, getPath('config'), 'main'), newConfig); 
+    } 
+    catch (e) { 
+      console.error("Save config error:", e); 
+      // 에러를 던져서 Settings 뷰에서 catch 할 수 있도록 변경
+      throw e; 
+    }
   };
 
   const trackEstimateToDB = async (data) => {
-    // 🚨 관리자 화면의 미리보기에서 발생한 견적 계산 통계 집계 제외
     if (!isClientMode) return;
     if (!db || !user) return;
     try { await addDoc(collection(db, getPath('estimates')), data); } 
@@ -1731,7 +1791,6 @@ function MainApp() {
         <AnimatePresence mode="wait">
           {activeTab === "preview" && (
             <motion.div key="preview" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
-              {/* 관리자 모드의 미리보기에서는 isClientMode=false가 전달됨 */}
               <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} isBlogMode={isBlogMode} setBlogMode={setBlogMode} isClientMode={isClientMode} />
             </motion.div>
           )}
