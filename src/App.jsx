@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Camera, Calendar, Users, Calculator, ArrowRight, ChevronDown, X, 
@@ -10,7 +10,7 @@ import {
 // --- Firebase Imports ---
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc, deleteDoc } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
 let app, auth, db;
@@ -392,7 +392,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
   return (
     <div className={`min-h-screen transition-colors duration-500 font-sans pb-24 relative overflow-x-hidden pt-[56px] sm:pt-[60px] ${isBlogMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
       
-      {/* 1. Top Navigation Bar */}
+      {/* Top Navigation Bar */}
       <header className={`fixed top-0 left-0 right-0 h-[56px] sm:h-[60px] z-[90] flex items-center justify-between px-3 sm:px-5 border-b backdrop-blur-[16px] transition-colors duration-500 ${isBlogMode ? 'bg-slate-950/80 border-slate-800 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.5)]' : 'bg-white/95 border-slate-100 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]'}`}>
         <div className="flex-shrink-0 w-10 sm:w-12">
           <button 
@@ -412,7 +412,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
         </div>
       </header>
 
-      {/* 2. Sidebar Drawer */}
+      {/* Sidebar Drawer */}
       <AnimatePresence>
         {isSidebarOpen && <motion.div key="sidebar-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-[4px] z-[999] touch-none" />}
         {isSidebarOpen && (
@@ -426,6 +426,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
             
             <div className="p-3 flex-1 flex flex-col gap-1.5 overflow-y-auto">
               {isBlogMode ? (
+                /* --- Blog Sidebar Tree --- */
                 safeConfig.blogFolders.map(folder => (
                   <div key={folder.id} className="flex flex-col mb-1">
                     <button 
@@ -433,31 +434,32 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
                       className="w-full flex items-center justify-between px-4 py-3.5 text-left text-[15px] font-semibold text-slate-300 hover:bg-slate-800 rounded-xl transition-colors"
                     >
                       <div className="flex items-center gap-3 truncate">
-                         <Folder className={`w-5 h-5 flex-shrink-0 ${sidebarExpandedFolders.has(folder.id) ? 'text-blue-400' : 'text-slate-500'}`} />
-                         <span className="truncate">{folder.title}</span>
+                        <Folder className={`w-5 h-5 flex-shrink-0 ${sidebarExpandedFolders.has(folder.id) ? 'text-blue-400' : 'text-slate-500'}`} />
+                        <span className="truncate">{folder.title}</span>
                       </div>
                       <ChevronDown className={`w-4 h-4 flex-shrink-0 text-slate-500 transition-transform ${sidebarExpandedFolders.has(folder.id) ? 'rotate-180' : ''}`} />
                     </button>
                     <AnimatePresence>
                       {sidebarExpandedFolders.has(folder.id) && (
                         <motion.div initial={{height:0, opacity:0}} animate={{height:'auto', opacity:1}} exit={{height:0, opacity:0}} className="overflow-hidden flex flex-col pl-4 mt-1 space-y-0.5">
-                           {folder.posts.map(post => (
-                             <button 
-                               key={post.id} 
-                               onClick={() => { setSelectedPost(post); setIsSidebarOpen(false); }}
-                               className="w-full flex items-center gap-2.5 px-4 py-3 text-[13px] sm:text-[14px] text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-xl transition-colors text-left font-medium"
-                             >
-                               <FileText className="w-4 h-4 opacity-40 flex-shrink-0" />
-                               <span className="truncate">{post.title}</span>
-                             </button>
-                           ))}
-                           {folder.posts.length === 0 && <div className="px-5 py-2 text-[12px] text-slate-600 font-medium">게시글이 없습니다.</div>}
+                          {folder.posts.map(post => (
+                            <button 
+                              key={post.id} 
+                              onClick={() => { setSelectedPost(post); setIsSidebarOpen(false); }}
+                              className="w-full flex items-center gap-2.5 px-4 py-3 text-[13px] sm:text-[14px] text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-xl transition-colors text-left font-medium"
+                            >
+                              <FileText className="w-4 h-4 opacity-40 flex-shrink-0" />
+                              <span className="truncate">{post.title}</span>
+                            </button>
+                          ))}
+                          {folder.posts.length === 0 && <div className="px-5 py-2 text-[12px] text-slate-600 font-medium">게시글이 없습니다.</div>}
                         </motion.div>
                       )}
                     </AnimatePresence>
                   </div>
                 ))
               ) : (
+                /* --- Calculator Sidebar Menus --- */
                 SIDEBAR_MENUS.map(menu => {
                   const isActive = activeSection === menu.id;
                   const IconComponent = menu.icon; 
@@ -491,18 +493,18 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
               
               {/* Main Slider */}
               <div className="rounded-3xl sm:rounded-[2rem] overflow-hidden shadow-2xl shadow-slate-200/50 bg-white border-[3px] sm:border-4 border-white max-w-sm sm:max-w-md mx-auto relative aspect-square">
-                 {safeConfig.sliderImages.length > 0 ? (
-                   <>
-                     <AnimatePresence initial={false}>
-                       <motion.img key={activeSlide} src={safeConfig.sliderImages[activeSlide]} alt="Slider" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.8 }} className="absolute inset-0 w-full h-full object-cover" />
-                     </AnimatePresence>
-                     <div className="absolute bottom-5 sm:bottom-6 left-0 right-0 flex justify-center gap-2 sm:gap-2.5 z-10">
-                       {safeConfig.sliderImages.map((_, i) => <div key={`dot-${i}`} className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${i === activeSlide ? 'w-5 sm:w-6 bg-white shadow-md' : 'w-1.5 sm:w-2 bg-white/60 hover:bg-white/90'}`} />)}
-                     </div>
-                   </>
-                 ) : (
-                   <div className="w-full h-full bg-slate-100 flex flex-col items-center justify-center text-slate-400 font-medium"><ImagePlus className="w-8 h-8 sm:w-10 sm:h-10 mb-2 opacity-50" /><p className="text-xs sm:text-sm text-center px-4">관리자에서 1:1 이미지를 업로드해주세요</p></div>
-                 )}
+                {safeConfig.sliderImages.length > 0 ? (
+                  <>
+                    <AnimatePresence initial={false}>
+                      <motion.img key={activeSlide} src={safeConfig.sliderImages[activeSlide]} alt="Slider" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.8 }} className="absolute inset-0 w-full h-full object-cover" />
+                    </AnimatePresence>
+                    <div className="absolute bottom-5 sm:bottom-6 left-0 right-0 flex justify-center gap-2 sm:gap-2.5 z-10">
+                      {safeConfig.sliderImages.map((_, i) => <div key={`dot-${i}`} className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${i === activeSlide ? 'w-5 sm:w-6 bg-white shadow-md' : 'w-1.5 sm:w-2 bg-white/60 hover:bg-white/90'}`} />)}
+                    </div>
+                  </>
+                ) : (
+                  <div className="w-full h-full bg-slate-100 flex flex-col items-center justify-center text-slate-400 font-medium"><ImagePlus className="w-8 h-8 sm:w-10 sm:h-10 mb-2 opacity-50" /><p className="text-xs sm:text-sm text-center px-4">관리자에서 1:1 이미지를 업로드해주세요</p></div>
+                )}
               </div>
 
               <div className="text-center space-y-3 sm:space-y-4 px-2">
@@ -615,8 +617,8 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
 
                     {safeConfig.priceTableImage && (
                       <div id="section-price-table" className="mt-5 sm:mt-6 bg-white rounded-3xl sm:rounded-[2rem] p-3 sm:p-4 shadow-sm border border-slate-100 overflow-hidden scroll-mt-24">
-                         <h3 className="font-bold text-slate-800 mb-2 sm:mb-3 px-2 flex items-center gap-1.5 sm:gap-2 text-[15px] sm:text-base"><Calculator className="w-4 h-4 text-blue-500"/> 촬영 상품 가격표</h3>
-                         <img src={safeConfig.priceTableImage} alt="Price Table" className="w-full h-auto object-contain rounded-xl sm:rounded-2xl border border-slate-50" />
+                        <h3 className="font-bold text-slate-800 mb-2 sm:mb-3 px-2 flex items-center gap-1.5 sm:gap-2 text-[15px] sm:text-base"><Calculator className="w-4 h-4 text-blue-500"/> 촬영 상품 가격표</h3>
+                        <img src={safeConfig.priceTableImage} alt="Price Table" className="w-full h-auto object-contain rounded-xl sm:rounded-2xl border border-slate-50" />
                       </div>
                     )}
                   </div>
@@ -668,7 +670,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
                         )
                       })}
                     </div>
-                    <div className="flex justify-center gap-2 mt-8 flex-wrap px-4">
+                    <div className="flex justify-center gap-2 mt-8">
                       {safeConfig.reviewImages.map((_, i) => (
                         <div key={`dot-${i}`} className={`h-1.5 sm:h-2 rounded-full transition-all duration-300 ${i === activeReviewSlide ? 'w-5 sm:w-6 bg-slate-800' : 'w-1.5 sm:w-2 bg-slate-200'}`} />
                       ))}
@@ -919,7 +921,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
 }
 
 // 2. Admin Settings View
-function AdminSettingsView({ config, onSaveConfig }) {
+function AdminSettingsView({ config, onSaveConfig, images }) {
   const safeConfig = { 
     ...DEFAULT_CONFIG, 
     ...config, 
@@ -930,17 +932,18 @@ function AdminSettingsView({ config, onSaveConfig }) {
     blogSubtitle: config.blogSubtitle || DEFAULT_CONFIG.blogSubtitle,
   };
   const [localConfig, setLocalConfig] = useState(safeConfig);
-  const [toastInfo, setToastInfo] = useState({ show: false, isError: false, message: "" });
+  const [showToast, setShowToast] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [configSize, setConfigSize] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => { setLocalConfig({ ...DEFAULT_CONFIG, ...config, faqs: config.faqs || DEFAULT_CONFIG.faqs, reviewImages: config.reviewImages || [], blogFolders: config.blogFolders || DEFAULT_CONFIG.blogFolders, blogTitle: config.blogTitle || DEFAULT_CONFIG.blogTitle, blogSubtitle: config.blogSubtitle || DEFAULT_CONFIG.blogSubtitle }); }, [config]);
 
-  useEffect(() => {
-    // 설정 데이터의 대략적인 바이트 크기 계산 (DB 1MB 제한 확인용)
-    const size = new Blob([JSON.stringify(localConfig)]).size;
-    setConfigSize(size);
-  }, [localConfig]);
+  // ID로 된 이미지를 Base64 URL로 변환하여 보여주기 위함
+  const getImageUrl = (src) => {
+    if (!src) return null;
+    if (src.startsWith('data:') || src.startsWith('http')) return src;
+    return images[src] || null;
+  };
 
   const handlePriceChange = (product, date, value) => {
     setLocalConfig(prev => ({...prev, prices: {...prev.prices, [product]: { ...prev.prices[product], [date]: Number(value) }}}));
@@ -949,74 +952,87 @@ function AdminSettingsView({ config, onSaveConfig }) {
     setLocalConfig(prev => ({...prev, framePrices: {...prev.framePrices, [type]: { ...prev.framePrices[type], [size]: Number(value) }}}));
   };
 
-  const handleImageUpload = (e, type, folderId = null, postId = null) => {
+  const deleteImageFromDB = async (imageId) => {
+    if (imageId && !imageId.startsWith('data:') && !imageId.startsWith('http')) {
+      try { await deleteDoc(doc(db, getPath('images'), imageId)); } catch(e) {}
+    }
+  };
+
+  const handleImageUpload = async (e, type, folderId = null, postId = null) => {
     const file = e.target.files[0];
     if (!file) return;
+    setIsUploading(true);
+
+    // 기존 이미지가 있다면 덮어쓰기 위해 저장 공간 확보(삭제)
+    let oldImageId = null;
+    if (type === 'popup') oldImageId = localConfig.popupImage;
+    if (type === 'priceTable') oldImageId = localConfig.priceTableImage;
+    if (type === 'blog') {
+      const folder = localConfig.blogFolders.find(f => f.id === folderId);
+      if (folder) {
+        const post = folder.posts.find(p => p.id === postId);
+        if (post) oldImageId = post.thumbnail;
+      }
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
       img.src = event.target.result;
-      img.onload = () => {
+      img.onload = async () => {
         const canvas = document.createElement('canvas');
-        
-        // --- 🚀 이미지 최적화 로직 적용 (해상도 및 화질 대폭 상향) ---
-        let MAX_WIDTH = 800;
-        let quality = 0.8; // 화질 80%로 상향
-
-        if (type === 'priceTable') { MAX_WIDTH = 1200; quality = 0.85; }
-        else if (type === 'review') { MAX_WIDTH = 800; quality = 0.8; } // 해상도 800px로 상향 (기존 450px)
-        else if (type === 'blog') { MAX_WIDTH = 800; quality = 0.8; }
-        else if (type === 'slider') { MAX_WIDTH = 1000; quality = 0.85; }
-        else if (type === 'popup') { MAX_WIDTH = 400; quality = 0.8; }
-
+        const MAX_WIDTH = type === 'priceTable' ? 1200 : type === 'review' ? 600 : type === 'blog' ? 400 : 800; 
         const scaleSize = MAX_WIDTH / img.width;
-        let targetWidth = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
-        let targetHeight = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
-
-        // 세로가 비정상적으로 긴 사진 방지
-        const MAX_HEIGHT = 1500;
-        if (targetHeight > MAX_HEIGHT) {
-            const heightScale = MAX_HEIGHT / targetHeight;
-            targetHeight = MAX_HEIGHT;
-            targetWidth = targetWidth * heightScale;
-        }
-
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
+        canvas.width = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
+        canvas.height = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const base64 = canvas.toDataURL('image/jpeg', 0.8); 
         
-        // jpeg 포맷과 조절된 퀄리티로 Base64 생성
-        const base64 = canvas.toDataURL('image/jpeg', quality); 
-        
-        if (type === 'slider') setLocalConfig(prev => ({ ...prev, sliderImages: [...prev.sliderImages, base64] }));
-        else if (type === 'review') setLocalConfig(prev => ({ ...prev, reviewImages: [...prev.reviewImages, base64] }));
-        else if (type === 'popup') setLocalConfig(prev => ({ ...prev, popupImage: base64 }));
-        else if (type === 'priceTable') setLocalConfig(prev => ({ ...prev, priceTableImage: base64 }));
-        else if (type === 'blog') {
-          setLocalConfig(prev => ({
-            ...prev,
-            blogFolders: prev.blogFolders.map(f => f.id === folderId ? { 
-              ...f, 
-              posts: f.posts.map(p => p.id === postId ? { ...p, thumbnail: base64 } : p) 
-            } : f)
-          }));
+        try {
+          // Firestore의 images 컬렉션에 1장씩 분리 저장
+          const docRef = await addDoc(collection(db, getPath('images')), { base64, createdAt: Date.now() });
+          const imageId = docRef.id;
+
+          if (oldImageId) deleteImageFromDB(oldImageId); // 이전 찌꺼기 이미지 삭제
+
+          if (type === 'slider') setLocalConfig(prev => ({ ...prev, sliderImages: [...prev.sliderImages, imageId] }));
+          else if (type === 'review') setLocalConfig(prev => ({ ...prev, reviewImages: [...prev.reviewImages, imageId] }));
+          else if (type === 'popup') setLocalConfig(prev => ({ ...prev, popupImage: imageId }));
+          else if (type === 'priceTable') setLocalConfig(prev => ({ ...prev, priceTableImage: imageId }));
+          else if (type === 'blog') {
+            setLocalConfig(prev => ({
+              ...prev,
+              blogFolders: prev.blogFolders.map(f => f.id === folderId ? { 
+                ...f, 
+                posts: f.posts.map(p => p.id === postId ? { ...p, thumbnail: imageId } : p) 
+              } : f)
+            }));
+          }
+        } catch(err) {
+          console.error(err);
+          alert("이미지 업로드에 실패했습니다. (권한 또는 용량 초과)");
         }
+        setIsUploading(false);
       };
     };
     reader.readAsDataURL(file);
   };
 
   const removeSliderImage = (index) => {
+    const imageId = localConfig.sliderImages[index];
     const newImages = [...localConfig.sliderImages];
     newImages.splice(index, 1);
     setLocalConfig({ ...localConfig, sliderImages: newImages });
+    deleteImageFromDB(imageId);
   };
 
   const removeReviewImage = (index) => {
+    const imageId = localConfig.reviewImages[index];
     const newImages = [...localConfig.reviewImages];
     newImages.splice(index, 1);
     setLocalConfig({ ...localConfig, reviewImages: newImages });
+    deleteImageFromDB(imageId);
   };
 
   const handleFaqChange = (index, field, value) => {
@@ -1036,7 +1052,11 @@ function AdminSettingsView({ config, onSaveConfig }) {
     const newFolder = { id: `folder_${Date.now()}`, title: "새로운 카테고리", posts: [] };
     setLocalConfig(prev => ({ ...prev, blogFolders: [...prev.blogFolders, newFolder] }));
   };
-  const removeBlogFolder = (id) => setLocalConfig(prev => ({ ...prev, blogFolders: prev.blogFolders.filter(f => f.id !== id) }));
+  const removeBlogFolder = (id) => {
+    const folder = localConfig.blogFolders.find(f => f.id === id);
+    if (folder) folder.posts.forEach(post => { if (post.thumbnail) deleteImageFromDB(post.thumbnail); });
+    setLocalConfig(prev => ({ ...prev, blogFolders: prev.blogFolders.filter(f => f.id !== id) }));
+  }
   
   const addBlogPost = (folderId) => {
     const newPost = { id: `post_${Date.now()}`, title: "새로운 블로그 글", date: new Date().toLocaleDateString().replace(/\s/g, ''), tags: [], thumbnail: "", link: "" };
@@ -1046,40 +1066,37 @@ function AdminSettingsView({ config, onSaveConfig }) {
     setLocalConfig(prev => ({ ...prev, blogFolders: prev.blogFolders.map(f => f.id === folderId ? { ...f, posts: f.posts.map(p => p.id === postId ? { ...p, ...fields } : p) } : f) }));
   };
   const removeBlogPost = (folderId, postId) => {
+    const folder = localConfig.blogFolders.find(f => f.id === folderId);
+    if (folder) {
+      const post = folder.posts.find(p => p.id === postId);
+      if (post && post.thumbnail) deleteImageFromDB(post.thumbnail);
+    }
     setLocalConfig(prev => ({ ...prev, blogFolders: prev.blogFolders.map(f => f.id === folderId ? { ...f, posts: f.posts.filter(p => p.id !== postId) } : f) }));
   };
 
   const saveSettings = async () => {
-    if (configSize > 1048576) {
-      setToastInfo({ show: true, isError: true, message: "저장 실패! 데이터가 1MB를 초과했습니다. 고화질 사진 개수를 줄여주세요." });
-      setTimeout(() => setToastInfo(prev => ({ ...prev, show: false })), 4000);
-      return;
-    }
-
     setIsSaving(true);
-    try {
-      await onSaveConfig(localConfig);
-      setToastInfo({ show: true, isError: false, message: "설정이 성공적으로 저장되었습니다." });
-    } catch (e) {
-      setToastInfo({ show: true, isError: true, message: "저장 실패! 데이터 용량을 초과했습니다. 사진 개수나 해상도를 줄여주세요 (DB 1MB 제한)." });
-    }
+    await onSaveConfig(localConfig);
     setIsSaving(false);
-    setTimeout(() => setToastInfo(prev => ({ ...prev, show: false })), 4000);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
   };
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-8 space-y-8 sm:space-y-12 relative pb-32">
       <AnimatePresence>
-        {toastInfo.show && (
-          <motion.div 
-            key="toast-msg" 
-            initial={{ opacity: 0, y: -20 }} 
-            animate={{ opacity: 1, y: 0 }} 
-            exit={{ opacity: 0, y: -20 }} 
-            className={`fixed top-8 left-1/2 -translate-x-1/2 z-[3000] flex items-center gap-2 sm:gap-3 px-5 sm:px-6 py-3 sm:py-4 rounded-full shadow-2xl font-medium text-sm sm:text-base whitespace-nowrap ${toastInfo.isError ? 'bg-red-600 text-white' : 'bg-slate-900 text-white'}`}
-          >
-            {toastInfo.isError ? <X className="w-5 h-5 text-white" /> : <CheckCircle className="w-5 h-5 text-green-400" />}
-            {toastInfo.message}
+        {isUploading && (
+          <motion.div key="upload-loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[4000] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+            <div className="bg-white p-6 sm:p-8 rounded-2xl flex flex-col items-center shadow-2xl border border-slate-200">
+              <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-3" />
+              <p className="font-bold text-slate-800">이미지 업로드 중...</p>
+              <p className="text-xs text-slate-500 mt-1">안전하게 저장소를 분리하여 무제한 보관합니다.</p>
+            </div>
+          </motion.div>
+        )}
+        {showToast && (
+          <motion.div key="toast-success" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="fixed top-8 left-1/2 -translate-x-1/2 z-[3000] flex items-center gap-2 sm:gap-3 bg-slate-900 text-white px-5 sm:px-6 py-3 sm:py-4 rounded-full shadow-2xl font-medium text-sm sm:text-base whitespace-nowrap">
+            <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 text-green-400" />설정이 성공적으로 저장되었습니다.
           </motion.div>
         )}
       </AnimatePresence>
@@ -1133,9 +1150,9 @@ function AdminSettingsView({ config, onSaveConfig }) {
                     
                     {/* Thumbnail Upload */}
                     <div className="w-full sm:w-32 h-32 sm:h-32 bg-slate-100 rounded-lg flex-shrink-0 relative overflow-hidden border border-slate-200">
-                      {post.thumbnail ? (
+                      {post.thumbnail && getImageUrl(post.thumbnail) ? (
                         <>
-                          <img src={post.thumbnail} className="w-full h-full object-cover" alt="thumbnail" />
+                          <img src={getImageUrl(post.thumbnail)} className="w-full h-full object-cover" alt="thumbnail" />
                           <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white text-xs font-bold">
                             변경<input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'blog', folder.id, post.id)} />
                           </label>
@@ -1190,7 +1207,7 @@ function AdminSettingsView({ config, onSaveConfig }) {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
               {localConfig.sliderImages.map((img, idx) => (
                 <div key={`admin-slide-${idx}`} className="relative aspect-square rounded-xl sm:rounded-2xl overflow-hidden border border-slate-200 group bg-slate-50">
-                  <img src={img} alt={`Slide ${idx}`} className="w-full h-full object-cover" />
+                  <img src={getImageUrl(img)} alt={`Slide ${idx}`} className="w-full h-full object-cover" />
                   <button onClick={() => removeSliderImage(idx)} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-6 h-6 sm:w-8 sm:h-8 text-white" /></button>
                 </div>
               ))}
@@ -1204,11 +1221,11 @@ function AdminSettingsView({ config, onSaveConfig }) {
           
           <div>
             <label className="flex items-center gap-2 text-[15px] sm:text-base font-bold text-slate-800 mb-3 sm:mb-4"><span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[11px] sm:text-xs">3:4 세로 비율</span> 리뷰 슬라이더 사진</label>
-            <p className="text-[12px] sm:text-sm text-slate-500 mb-4">화면 하단 리뷰 슬라이더에 표시될 세로형 사진들을 여러 장 업로드하세요. (최적화가 적용되어 10장 이상도 저장됩니다.)</p>
+            <p className="text-[12px] sm:text-sm text-slate-500 mb-4">화면 하단 리뷰 슬라이더에 표시될 세로형 사진들을 업로드하세요.</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
               {localConfig.reviewImages.map((img, idx) => (
                 <div key={`admin-review-${idx}`} className="relative aspect-[3/4] rounded-xl sm:rounded-2xl overflow-hidden border border-slate-200 group bg-slate-50">
-                  <img src={img} alt={`Review ${idx}`} className="w-full h-full object-cover" />
+                  <img src={getImageUrl(img)} alt={`Review ${idx}`} className="w-full h-full object-cover" />
                   <button onClick={() => removeReviewImage(idx)} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-6 h-6 sm:w-8 sm:h-8 text-white" /></button>
                 </div>
               ))}
@@ -1223,10 +1240,10 @@ function AdminSettingsView({ config, onSaveConfig }) {
           <div className="grid md:grid-cols-2 gap-6 sm:gap-8">
             <div className="bg-slate-50 p-5 sm:p-6 rounded-2xl border border-slate-100">
               <label className="block text-[14px] sm:text-sm font-bold text-slate-800 mb-3 sm:mb-4">안내 팝업용 사진 (동그랗게 표시됨)</label>
-              {localConfig.popupImage ? (
+              {localConfig.popupImage && getImageUrl(localConfig.popupImage) ? (
                 <div className="relative w-24 h-24 sm:w-32 sm:h-32 rounded-full overflow-hidden border border-slate-200 group bg-white shadow-sm mb-3 sm:mb-4">
-                  <img src={localConfig.popupImage} alt="Popup" className="w-full h-full object-cover" />
-                  <button onClick={() => setLocalConfig({...localConfig, popupImage: null})} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-5 h-5 sm:w-6 sm:h-6 text-white" /></button>
+                  <img src={getImageUrl(localConfig.popupImage)} alt="Popup" className="w-full h-full object-cover" />
+                  <button onClick={() => { deleteImageFromDB(localConfig.popupImage); setLocalConfig({...localConfig, popupImage: null}); }} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-5 h-5 sm:w-6 sm:h-6 text-white" /></button>
                 </div>
               ) : (
                 <label className="w-24 h-24 sm:w-32 sm:h-32 rounded-full border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 flex flex-col items-center justify-center cursor-pointer text-slate-500 hover:text-blue-600 mb-3 sm:mb-4 bg-white"><UploadCloud className="w-5 h-5 sm:w-6 sm:h-6 mb-1" /><span className="text-[11px] sm:text-xs font-bold">업로드</span><input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'popup')} /></label>
@@ -1235,10 +1252,10 @@ function AdminSettingsView({ config, onSaveConfig }) {
             </div>
             <div className="bg-slate-50 p-5 sm:p-6 rounded-2xl border border-slate-100">
               <label className="block text-[14px] sm:text-sm font-bold text-slate-800 mb-3 sm:mb-4">하단 상품 가격표 이미지 <span className="text-blue-500 font-normal">(원본비율 적용)</span></label>
-              {localConfig.priceTableImage ? (
+              {localConfig.priceTableImage && getImageUrl(localConfig.priceTableImage) ? (
                 <div className="relative rounded-xl overflow-hidden border border-slate-200 group bg-white shadow-sm mb-3 sm:mb-4 max-w-xs">
-                  <img src={localConfig.priceTableImage} alt="Price Table" className="w-full h-auto object-contain" />
-                  <button onClick={() => setLocalConfig({...localConfig, priceTableImage: null})} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-6 h-6 sm:w-8 sm:h-8 text-white" /></button>
+                  <img src={getImageUrl(localConfig.priceTableImage)} alt="Price Table" className="w-full h-auto object-contain" />
+                  <button onClick={() => { deleteImageFromDB(localConfig.priceTableImage); setLocalConfig({...localConfig, priceTableImage: null}); }} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-6 h-6 sm:w-8 sm:h-8 text-white" /></button>
                 </div>
               ) : (
                 <label className="w-24 h-24 sm:h-32 rounded-xl border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 flex flex-col items-center justify-center cursor-pointer text-slate-500 hover:text-blue-600 mb-3 sm:mb-4 bg-white"><UploadCloud className="w-5 h-5 sm:w-6 sm:h-6 mb-1" /><span className="text-[13px] sm:text-sm font-bold">가격표 업로드</span><input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'priceTable')} /></label>
@@ -1354,20 +1371,8 @@ function AdminSettingsView({ config, onSaveConfig }) {
 
       {/* Floating Save Bar */}
       <div className="fixed sm:sticky bottom-4 sm:bottom-4 left-4 right-4 sm:left-0 sm:right-0 bg-white/95 backdrop-blur-md p-3 sm:p-4 rounded-2xl shadow-2xl border border-slate-200 flex flex-col sm:flex-row justify-end items-center gap-3 sm:gap-4 z-[2500]">
-        
-        {/* DB 용량 게이지 바 추가 */}
-        <div className="hidden sm:flex flex-col flex-1 w-full max-w-xs mr-auto pl-2">
-          <div className="flex justify-between text-[11px] sm:text-xs font-bold mb-1.5">
-            <span className={configSize > 1048576 ? "text-red-500" : "text-slate-500"}>DB 저장 용량 (최대 1MB)</span>
-            <span className={configSize > 1048576 ? "text-red-500" : "text-blue-600"}>{(configSize / (1024 * 1024)).toFixed(2)} MB / 1.0 MB</span>
-          </div>
-          <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-            <div className={`h-full transition-all duration-300 ${configSize > 1048576 ? "bg-red-500" : configSize > 800000 ? "bg-orange-400" : "bg-blue-500"}`} style={{ width: `${Math.min((configSize / 1048576) * 100, 100)}%` }} />
-          </div>
-        </div>
-        
         <button onClick={() => setLocalConfig(safeConfig)} className="w-full sm:w-auto px-5 sm:px-6 py-3 sm:py-3.5 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors text-sm sm:text-base">설정 초기화</button>
-        <motion.button whileTap={{ scale: 0.95 }} onClick={saveSettings} disabled={isSaving || configSize > 1048576} className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 sm:px-8 py-3.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/30 text-base sm:text-lg disabled:opacity-50 disabled:cursor-not-allowed">
+        <motion.button whileTap={{ scale: 0.95 }} onClick={saveSettings} disabled={isSaving || isUploading} className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 sm:px-8 py-3.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/30 text-base sm:text-lg disabled:opacity-50">
           {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />} 
           데이터베이스에 저장
         </motion.button>
@@ -1556,7 +1561,7 @@ function AdminLoginView({ onLogin }) {
       
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-white p-8 sm:p-10 rounded-3xl shadow-2xl w-full max-w-sm border border-slate-200 relative z-10">
         <div className="flex justify-center mb-6">
-           <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl shadow-inner"><Lock className="w-8 h-8 sm:w-10 sm:h-10" /></div>
+          <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl shadow-inner"><Lock className="w-8 h-8 sm:w-10 sm:h-10" /></div>
         </div>
         <h2 className="text-2xl sm:text-3xl font-bold text-center text-slate-800 mb-2 tracking-tight">관리자 로그인</h2>
         <p className="text-center text-slate-500 text-sm mb-8">안전한 데이터 관리를 위해 로그인해주세요.</p>
@@ -1644,6 +1649,9 @@ function MainApp() {
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [visits, setVisits] = useState([]);
   const [estimates, setEstimates] = useState([]);
+  
+  // 이미지 무한 업로드를 위한 분리된 상태 (Firestore 'images' 컬렉션 동기화)
+  const [images, setImages] = useState({});
 
   useEffect(() => {
     if (!auth) {
@@ -1675,6 +1683,7 @@ function MainApp() {
     let unsubConfig = () => {};
     let unsubVisits = () => {};
     let unsubEstimates = () => {};
+    let unsubImages = () => {};
 
     try {
       unsubConfig = onSnapshot(doc(db, getPath('config'), 'main'), (docSnap) => {
@@ -1693,6 +1702,16 @@ function MainApp() {
         snap.forEach(d => e.push(d.data()));
         setEstimates(e);
       }, err => console.error("Estimates fetch error:", err));
+
+      // 분리된 이미지 데이터 동기화
+      unsubImages = onSnapshot(collection(db, getPath('images')), (snap) => {
+        const newImages = {};
+        snap.forEach(doc => {
+          newImages[doc.id] = doc.data().base64;
+        });
+        setImages(newImages);
+      }, err => console.error("Images fetch error:", err));
+
     } catch(e) {
       console.error("Firestore onSnapshot setup error:", e);
     }
@@ -1701,39 +1720,69 @@ function MainApp() {
       unsubConfig(); 
       unsubVisits(); 
       unsubEstimates(); 
+      unsubImages();
     };
   }, [isDbReady, user]);
 
   const saveConfigToDB = async (newConfig) => {
     if (!db) return;
-    try { 
-      await setDoc(doc(db, getPath('config'), 'main'), newConfig); 
-    } 
-    catch (e) { 
-      console.error("Save config error:", e); 
-      // 에러를 던져서 Settings 뷰에서 catch 할 수 있도록 변경
-      throw e; 
-    }
+    try { await setDoc(doc(db, getPath('config'), 'main'), newConfig); } 
+    catch (e) { console.error("Save config error:", e); }
   };
 
   const trackEstimateToDB = async (data) => {
+    // 🚨 관리자 화면의 미리보기에서 발생한 견적 계산 통계 집계 제외
     if (!isClientMode) return;
     if (!db || !user) return;
     try { await addDoc(collection(db, getPath('estimates')), data); } 
     catch (e) { console.error("Track estimate error:", e); }
   };
 
+  // config 내부의 이미지 id를 실제 이미지 데이터(base64)로 변환
+  const getImageUrl = useCallback((src) => {
+    if (!src) return null;
+    if (src.startsWith('data:') || src.startsWith('http')) return src;
+    return images[src] || null; // src 반환 안함. 못찾으면 null 반환 (로딩중이거나 삭제됨)
+  }, [images]);
+
+  // 화면 렌더링용 (config 문서에서 아이디만 가져와서 실제 데이터 주입)
+  const processedConfig = useMemo(() => {
+    const safeConfig = { 
+      ...DEFAULT_CONFIG, 
+      ...config,
+      faqs: config.faqs || DEFAULT_CONFIG.faqs, 
+      reviewImages: config.reviewImages || [],
+      blogFolders: config.blogFolders || DEFAULT_CONFIG.blogFolders,
+      blogTitle: config.blogTitle || DEFAULT_CONFIG.blogTitle,
+      blogSubtitle: config.blogSubtitle || DEFAULT_CONFIG.blogSubtitle
+    };
+    return {
+      ...safeConfig,
+      sliderImages: (safeConfig.sliderImages || []).map(getImageUrl).filter(Boolean),
+      reviewImages: (safeConfig.reviewImages || []).map(getImageUrl).filter(Boolean),
+      popupImage: getImageUrl(safeConfig.popupImage),
+      priceTableImage: getImageUrl(safeConfig.priceTableImage),
+      blogFolders: (safeConfig.blogFolders || []).map(folder => ({
+        ...folder,
+        posts: folder.posts.map(post => ({
+          ...post,
+          thumbnail: getImageUrl(post.thumbnail)
+        }))
+      }))
+    };
+  }, [config, getImageUrl]);
+
   if (!isDbReady) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50 flex-col gap-4 text-slate-500">
         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-        <p className="font-medium">데이터베이스 연결 중...</p>
+        <p className="font-medium">데이터베이스 연동 중...</p>
       </div>
     );
   }
 
-  // 고객용 뷰 (클라이언트 모드) - isClientMode 속성 전달
-  if (isClientMode) return <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} isBlogMode={isBlogMode} setBlogMode={setBlogMode} isClientMode={isClientMode} />;
+  // 고객용 뷰 (클라이언트 모드)
+  if (isClientMode) return <CalculatorView config={processedConfig} onEstimateComplete={trackEstimateToDB} visits={visits} isBlogMode={isBlogMode} setBlogMode={setBlogMode} isClientMode={isClientMode} />;
 
   // 관리자 모드 접속 시, 로그인 확인
   if (!isAdminAuthenticated) {
@@ -1791,12 +1840,12 @@ function MainApp() {
         <AnimatePresence mode="wait">
           {activeTab === "preview" && (
             <motion.div key="preview" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
-              <CalculatorView config={config} onEstimateComplete={trackEstimateToDB} visits={visits} isBlogMode={isBlogMode} setBlogMode={setBlogMode} isClientMode={isClientMode} />
+              <CalculatorView config={processedConfig} onEstimateComplete={trackEstimateToDB} visits={visits} isBlogMode={isBlogMode} setBlogMode={setBlogMode} isClientMode={isClientMode} />
             </motion.div>
           )}
           {activeTab === "settings" && (
             <motion.div key="settings" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
-              <AdminSettingsView config={config} onSaveConfig={saveConfigToDB} />
+              <AdminSettingsView config={config} onSaveConfig={saveConfigToDB} images={images} />
             </motion.div>
           )}
           {activeTab === "statistics" && (
