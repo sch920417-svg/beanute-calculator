@@ -155,17 +155,28 @@ const BouncyTag = ({ text, colorClass = "bg-red-500" }) => (
   </motion.span>
 );
 
+// 단일 알약(Pill) 형태의 전환 토글 컴포넌트
 const ModeToggle = ({ isBlogMode, onToggle }) => (
-  <div className="relative bg-slate-200/50 dark:bg-slate-800 p-1 rounded-full flex items-center w-[160px] sm:w-[180px] cursor-pointer shadow-inner overflow-hidden border border-slate-200/50" onClick={onToggle}>
-    <motion.div 
-      className={`absolute top-1 bottom-1 rounded-full shadow-md z-0 ${isBlogMode ? 'bg-slate-700' : 'bg-white'}`}
-      animate={{ x: isBlogMode ? '90%' : '0%' }}
-      transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      style={{ width: '50%' }}
-    />
-    <div className={`flex-1 text-center z-10 text-[12px] sm:text-[13px] font-bold transition-colors ${!isBlogMode ? 'text-slate-900' : 'text-slate-400'}`}>계산기 모드</div>
-    <div className={`flex-1 text-center z-10 text-[12px] sm:text-[13px] font-bold transition-colors ${isBlogMode ? 'text-white' : 'text-slate-500'}`}>블로그 모드</div>
-  </div>
+  <motion.button
+    whileTap={{ scale: 0.95 }}
+    onClick={onToggle}
+    className={`px-3.5 py-1.5 rounded-full text-[12px] font-bold shadow-sm border transition-all flex items-center gap-1.5
+      ${isBlogMode 
+        ? 'bg-slate-800 text-white border-slate-700 hover:bg-slate-700' 
+        : 'bg-white text-blue-600 border-blue-100 hover:bg-blue-50'}`}
+  >
+    {isBlogMode ? (
+      <>
+        <Calculator className="w-3.5 h-3.5" />
+        <span>견적기 전환</span>
+      </>
+    ) : (
+      <>
+        <FileText className="w-3.5 h-3.5" />
+        <span>블로그 전환</span>
+      </>
+    )}
+  </motion.button>
 );
 
 function TagEditor({ tags, onChange }) {
@@ -223,7 +234,6 @@ function TagEditor({ tags, onChange }) {
 // --- Views ---
 
 // 1. Calculator View (User Facing)
-// isClientMode Props를 추가로 전달받아 통계 기록 시 관리자화면인지 확인합니다.
 function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlogMode, isClientMode = false }) {
   const safeConfig = { 
     ...DEFAULT_CONFIG, 
@@ -259,7 +269,6 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
 
   useEffect(() => {
     const logVisit = async () => {
-      // 🚨 관리자 화면(미리보기)일 경우 방문 통계 기록 생략!
       if (!isClientMode) return;
       if (!auth || !auth.currentUser) return;
       try {
@@ -384,16 +393,25 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
   return (
     <div className={`min-h-screen transition-colors duration-500 font-sans pb-24 relative overflow-x-hidden pt-[56px] sm:pt-[60px] ${isBlogMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
       
-      {/* 1. Top Navigation Bar */}
-      <header className={`fixed top-0 left-0 right-0 h-[56px] sm:h-[60px] z-[90] flex items-center justify-between px-3 sm:px-4 border-b backdrop-blur-[16px] transition-colors duration-500 ${isBlogMode ? 'bg-slate-950/80 border-slate-800 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.5)]' : 'bg-white/95 border-slate-100 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]'}`}>
-        <button 
-          onClick={() => setIsSidebarOpen(true)} 
-          className={`p-2 sm:p-2.5 rounded-full transition-colors w-[44px] h-[44px] flex items-center justify-center ${isBlogMode ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-slate-100 text-slate-800'}`}
-        >
-          <Menu className="w-6 h-6" />
-        </button>
-        <h1 className={`text-[16px] sm:text-[18px] font-semibold absolute left-1/2 -translate-x-1/2 tracking-tight ${isBlogMode ? 'text-white' : 'text-slate-900'}`}>비뉴뜨 견적계산기</h1>
-        <ModeToggle isBlogMode={isBlogMode} onToggle={() => setBlogMode(!isBlogMode)} />
+      {/* 1. Top Navigation Bar - 구조 개선하여 겹침 현상 방지 */}
+      <header className={`fixed top-0 left-0 right-0 h-[56px] sm:h-[60px] z-[90] flex items-center justify-between px-3 sm:px-5 border-b backdrop-blur-[16px] transition-colors duration-500 ${isBlogMode ? 'bg-slate-950/80 border-slate-800 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.5)]' : 'bg-white/95 border-slate-100 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]'}`}>
+        <div className="flex-shrink-0 w-10 sm:w-12">
+          <button 
+            onClick={() => setIsSidebarOpen(true)} 
+            className={`p-2 rounded-full transition-colors w-[40px] h-[40px] flex items-center justify-center ${isBlogMode ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-slate-100 text-slate-800'}`}
+          >
+            <Menu className="w-5 h-5 sm:w-6 sm:h-6" />
+          </button>
+        </div>
+
+        {/* 중앙 제목: 절대 위치를 사용하되 max-width와 truncate를 주어 버튼과 겹침 방지 */}
+        <h1 className={`text-[15px] sm:text-[18px] font-bold absolute left-1/2 -translate-x-1/2 tracking-tight whitespace-nowrap max-w-[40%] overflow-hidden truncate text-center ${isBlogMode ? 'text-white' : 'text-slate-900'}`}>
+          비뉴뜨 견적계산기
+        </h1>
+
+        <div className="flex-shrink-0">
+          <ModeToggle isBlogMode={isBlogMode} onToggle={() => setBlogMode(!isBlogMode)} />
+        </div>
       </header>
 
       {/* 2. Sidebar Drawer */}
@@ -1180,7 +1198,7 @@ function AdminSettingsView({ config, onSaveConfig }) {
                   <button onClick={() => setLocalConfig({...localConfig, priceTableImage: null})} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Trash2 className="w-6 h-6 sm:w-8 sm:h-8 text-white" /></button>
                 </div>
               ) : (
-                <label className="w-full h-24 sm:h-32 rounded-xl border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 flex flex-col items-center justify-center cursor-pointer text-slate-500 hover:text-blue-600 mb-3 sm:mb-4 bg-white"><UploadCloud className="w-5 h-5 sm:w-6 sm:h-6 mb-1" /><span className="text-[13px] sm:text-sm font-bold">가격표 업로드</span><input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'priceTable')} /></label>
+                <label className="w-24 h-24 sm:h-32 rounded-xl border-2 border-dashed border-slate-300 hover:border-blue-500 hover:bg-blue-50 flex flex-col items-center justify-center cursor-pointer text-slate-500 hover:text-blue-600 mb-3 sm:mb-4 bg-white"><UploadCloud className="w-5 h-5 sm:w-6 sm:h-6 mb-1" /><span className="text-[13px] sm:text-sm font-bold">가격표 업로드</span><input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'priceTable')} /></label>
               )}
               <p className="text-[11px] sm:text-xs text-slate-500">결과 화면 우측 하단에 들어가는 상세 표입니다.</p>
             </div>
