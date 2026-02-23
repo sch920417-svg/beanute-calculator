@@ -9,20 +9,23 @@ import {
 
 // --- Firebase Imports ---
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc } from 'firebase/firestore';
 
 // --- Firebase Initialization (중복 실행 방지 및 환경설정 완료) ---
 let app, auth, db;
 try {
-  const firebaseConfig = {
-    apiKey: "AIzaSyDgfsV0pdtFAbG3hXFYwhCjxb8g6IQhbuk",
-    authDomain: "calculator-30cc8.firebaseapp.com",
-    projectId: "calculator-30cc8",
-    storageBucket: "calculator-30cc8.firebasestorage.app",
-    messagingSenderId: "992976775409",
-    appId: "1:992976775409:web:4b3541b364705e49b5e150"
-  };
+  // Canvas 환경에서 주입하는 설정이 있으면 우선 사용하고, 없으면 제공된 기본값 사용
+  const firebaseConfig = typeof __firebase_config !== 'undefined' 
+    ? JSON.parse(__firebase_config) 
+    : {
+        apiKey: "AIzaSyDgfsV0pdtFAbG3hXFYwhCjxb8g6IQhbuk",
+        authDomain: "calculator-30cc8.firebaseapp.com",
+        projectId: "calculator-30cc8",
+        storageBucket: "calculator-30cc8.firebasestorage.app",
+        messagingSenderId: "992976775409",
+        appId: "1:992976775409:web:4b3541b364705e49b5e150"
+      };
   
   // 저장할 때마다 파이어베이스가 중복으로 켜지는 것을 방지
   app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
@@ -34,10 +37,8 @@ try {
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'family-photo-app';
 const getPath = (colName) => {
-  if (typeof __app_id !== 'undefined') {
-    return `artifacts/${appId}/public/data/${colName}`;
-  }
-  return colName; 
+  // Canvas Firestore 규칙에 맞게 경로 강제 할당
+  return `artifacts/${appId}/public/data/${colName}`; 
 };
 
 // --- Constants (Keys) ---
@@ -153,6 +154,8 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
   // Visit Tracking
   useEffect(() => {
     const logVisit = async () => {
+      // 보안 룰 검증을 위한 현재 사용자 체크
+      if (!auth || !auth.currentUser) return;
       try {
         let region = "알 수 없음";
         try {
@@ -335,13 +338,13 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
             className="fixed inset-0 z-[2000] bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm touch-none"
             onClick={() => setLightboxIndex(null)}
           >
-            <button className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2 text-white/70 hover:text-white transition-colors bg-white/10 rounded-full z-50" onClick={() => setLightboxIndex(null)}>
+            <button className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2 text-white hover:text-white transition-colors bg-black/50 hover:bg-black/80 rounded-full z-[2010]" onClick={() => setLightboxIndex(null)}>
               <X className="w-7 h-7 sm:w-8 sm:h-8" />
             </button>
 
             {lightboxIndex > 0 && (
               <button
-                className="absolute left-2 sm:left-8 top-1/2 -translate-y-1/2 p-2 sm:p-3 text-white/70 hover:text-white transition-colors bg-white/10 hover:bg-white/20 rounded-full z-50"
+                className="absolute left-2 sm:left-8 top-1/2 -translate-y-1/2 p-2 sm:p-3 text-white transition-colors bg-black/50 hover:bg-black/80 rounded-full z-[2010] backdrop-blur-sm"
                 onClick={(e) => { e.stopPropagation(); setLightboxIndex(prev => prev - 1); }}
               >
                 <ChevronLeft className="w-8 h-8 sm:w-10 sm:h-10" />
@@ -352,14 +355,14 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
               key={`lightbox-img-${lightboxIndex}`}
               initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
               src={safeConfig.reviewImages[lightboxIndex]} alt="review-lightbox" 
-              className="w-full h-full object-contain max-w-4xl max-h-[85vh] sm:max-h-[90vh]" 
+              className="w-full h-full object-contain max-w-4xl max-h-[85vh] sm:max-h-[90vh] relative z-[2005]" 
               onClick={(e) => e.stopPropagation()} 
             />
 
             {lightboxIndex < safeConfig.reviewImages.length - 1 && (
               <button
-                className="absolute right-2 sm:right-8 top-1/2 -translate-y-1/2 p-2 sm:p-3 text-white/70 hover:text-white transition-colors bg-white/10 hover:bg-white/20 rounded-full z-50"
-                onClick={(e) => { e.stopPropagation(); setLightboxIndex(prev => prev - 1); }}
+                className="absolute right-2 sm:right-8 top-1/2 -translate-y-1/2 p-2 sm:p-3 text-white transition-colors bg-black/50 hover:bg-black/80 rounded-full z-[2010] backdrop-blur-sm"
+                onClick={(e) => { e.stopPropagation(); setLightboxIndex(prev => prev + 1); }}
               >
                 <ChevronRight className="w-8 h-8 sm:w-10 sm:h-10" />
               </button>
@@ -535,7 +538,7 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
                 <Star className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-400 fill-yellow-400" />
               </div>
               
-              <div className="relative h-[320px] sm:h-[420px] w-full flex items-center justify-center touch-pan-y">
+              <div className="relative h-[400px] sm:h-[500px] w-full flex items-center justify-center touch-pan-y">
                 {safeConfig.reviewImages.map((img, i) => {
                   const offset = i - activeReviewSlide;
                   // Limit rendering to nearby slides for performance
@@ -564,9 +567,9 @@ function CalculatorView({ config, onEstimateComplete, visits }) {
                         if (offset === 0) setLightboxIndex(i);
                         else setActiveReviewSlide(i);
                       }}
-                      className={`absolute w-[180px] sm:w-[240px] aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl cursor-pointer ${offset === 0 ? 'ring-2 ring-white/50' : ''}`}
+                      className={`absolute w-[240px] sm:w-[320px] aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl cursor-pointer ${offset === 0 ? 'ring-2 ring-white/50' : ''}`}
                     >
-                      <img src={img} alt={`Review ${i}`} className="w-full h-full object-cover pointer-events-none" draggable={false} />
+                      <img src={img} alt={`Review ${i}`} className="w-full h-full object-cover pointer-events-none bg-slate-50" draggable={false} />
                     </motion.div>
                   )
                 })}
@@ -1223,7 +1226,11 @@ function MainApp() {
     }
     const initAuth = async () => {
       try {
-        await signInAnonymously(auth);
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
       } catch(e) { 
         console.error("Auth error", e); 
         // 인증에 실패하더라도 무조건 데이터를 볼 수 있도록 강제 통과 처리
@@ -1240,7 +1247,7 @@ function MainApp() {
   }, []);
 
   useEffect(() => {
-    if (!isDbReady || !db) return;
+    if (!isDbReady || !db || !user) return;
 
     let unsubConfig = () => {};
     let unsubVisits = () => {};
@@ -1272,7 +1279,7 @@ function MainApp() {
       unsubVisits(); 
       unsubEstimates(); 
     };
-  }, [isDbReady]);
+  }, [isDbReady, user]);
 
   const saveConfigToDB = async (newConfig) => {
     if (!db) return;
@@ -1281,7 +1288,7 @@ function MainApp() {
   };
 
   const trackEstimateToDB = async (data) => {
-    if (!db) return;
+    if (!db || !user) return;
     try { await addDoc(collection(db, getPath('estimates')), data); } 
     catch (e) { console.error("Track estimate error:", e); }
   };
