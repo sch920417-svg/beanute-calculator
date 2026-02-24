@@ -1089,11 +1089,13 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
             )}
 
             <SmartMotionImage 
-              key={`lightbox-img-${lightboxIndex}`}
+              key="lightbox-static-img"
               initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ duration: 0.2 }}
               src={safeConfig.reviewImages[lightboxIndex]} alt="review-lightbox" 
               className="w-full h-full object-contain max-w-4xl max-h-[85vh] sm:max-h-[90vh] relative z-[2005]" 
               onClick={(e) => e.stopPropagation()} 
+              eager={true}
             />
 
             {lightboxIndex < safeConfig.reviewImages.length - 1 && (
