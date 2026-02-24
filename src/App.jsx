@@ -109,7 +109,7 @@ function SelectCustom({ value, onChange, options, label, disabled, className }) 
   );
 }
 
-function RadioCard({ selected, onClick, title, description, disabled }) {
+const RadioCard = React.memo(function RadioCard({ selected, onClick, title, description, disabled }) {
   return (
     <motion.button
       whileTap={{ scale: disabled ? 1 : 0.98 }}
@@ -126,9 +126,9 @@ function RadioCard({ selected, onClick, title, description, disabled }) {
       {description && <p className="mt-1 sm:mt-1.5 text-xs sm:text-sm font-medium text-slate-500">{description}</p>}
     </motion.button>
   );
-}
+});
 
-const BouncyTag = ({ text, colorClass = "bg-red-500" }) => (
+const BouncyTag = React.memo(({ text, colorClass = "bg-red-500" }) => (
   <motion.span 
     initial={{ scale: 0.8, opacity: 0 }}
     animate={{ scale: 1, opacity: 1 }}
@@ -138,7 +138,7 @@ const BouncyTag = ({ text, colorClass = "bg-red-500" }) => (
   >
     {text}
   </motion.span>
-);
+));
 
 const ModeToggle = ({ isBlogMode, onToggle }) => (
   <motion.button
@@ -247,20 +247,21 @@ function useMediaUrl(src) {
     const fetchChunks = async () => {
       try {
         const numCount = Number(count);
-        let base64Str = '';
+        const chunksData = [];
         
-        // 🔥 청크 단위 병렬 로딩 (10개씩 배치 처리하여 Firebase 429 오류 완벽 방지)
-        for (let i = 0; i < numCount; i += 10) {
+        // 🔥 청크 단위 병렬 로딩 (20개씩 배치 처리 및 Array 병합으로 로딩 속도 최적화)
+        for (let i = 0; i < numCount; i += 20) {
           const promises = [];
-          const end = Math.min(i + 10, numCount);
+          const end = Math.min(i + 20, numCount);
           for(let j=i; j<end; j++) {
             promises.push(getDoc(doc(db, getPath('image_chunks'), `${id}_${j}`)));
           }
           const snaps = await Promise.all(promises);
           if (!isMounted) return;
-          base64Str += snaps.map(s => s.exists() ? s.data().data : '').join('');
+          chunksData.push(...snaps.map(s => s.exists() ? s.data().data : ''));
         }
         
+        const base64Str = chunksData.join('');
         const fetchRes = await fetch(base64Str);
         const blob = await fetchRes.blob();
         if (!isMounted) return;
@@ -283,22 +284,22 @@ function useMediaUrl(src) {
 }
 
 // --- Smart Components that Handle Chunked Data Automatically ---
-function SmartImage({ src, alt, className, style, ...props }) {
+const SmartImage = React.memo(function SmartImage({ src, alt, className, style, eager = false, ...props }) {
   const resolvedUrl = useMediaUrl(src);
   if (!resolvedUrl) return <div className={`flex items-center justify-center bg-slate-100/50 text-slate-400 ${className}`} style={style}><Loader2 className="w-6 h-6 animate-spin"/></div>;
-  return <img src={resolvedUrl} alt={alt} className={className} style={style} {...props} />;
-}
+  return <img src={resolvedUrl} alt={alt} className={className} style={style} loading={eager ? "eager" : "lazy"} decoding="async" {...props} />;
+});
 
-function SmartVideo({ src, className, style, ...props }) {
+const SmartVideo = React.memo(function SmartVideo({ src, className, style, ...props }) {
   const resolvedUrl = useMediaUrl(src);
   if (!resolvedUrl) return <div className={`flex items-center justify-center bg-slate-100/50 text-slate-400 ${className}`} style={style}><Loader2 className="w-6 h-6 animate-spin"/></div>;
   return <video src={resolvedUrl} autoPlay muted loop playsInline className={className} style={style} {...props} />;
-}
+});
 
-const SmartMotionImage = motion(React.forwardRef(({ src, ...props }, ref) => {
+const SmartMotionImage = motion(React.forwardRef(({ src, eager = false, ...props }, ref) => {
   const resolvedUrl = useMediaUrl(src);
   if (!resolvedUrl) return <div ref={ref} className={`flex items-center justify-center bg-slate-100/50 ${props.className}`}><Loader2 className="w-6 h-6 animate-spin text-slate-400"/></div>;
-  return <img ref={ref} src={resolvedUrl} {...props} />;
+  return <img ref={ref} src={resolvedUrl} loading={eager ? "eager" : "lazy"} decoding="async" {...props} />;
 }));
 
 
@@ -318,7 +319,7 @@ const renderRichText = (text) => {
   });
 };
 
-const BlockViewer = ({ block }) => {
+const BlockViewer = React.memo(({ block }) => {
   const [sliderIndex, setSliderIndex] = useState(0);
   const alignClass = block.align === 'center' ? 'text-center' : block.align === 'right' ? 'text-right' : 'text-left';
 
@@ -417,7 +418,7 @@ const BlockViewer = ({ block }) => {
     default:
       return null;
   }
-};
+});
 
 const BeforeAfterViewer = ({ before, after }) => {
   const [pos, setPos] = useState(50);
@@ -717,6 +718,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
                         key={activeSlide} 
                         src={safeConfig.sliderImages[activeSlide]} 
                         alt="Slider" 
+                        eager={true}
                         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
                         transition={{ duration: 0.8 }} 
                         className="absolute inset-0 w-full h-full object-cover" 
@@ -1039,7 +1041,7 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
                               <div className="flex-1 flex flex-col justify-center sm:justify-between py-1">
                                 <div className="space-y-2 sm:space-y-3">
                                   <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                                    {post.tags.map((t, idx) => {
+                                    {post.tags?.map((t, idx) => {
                                       const isObj = typeof t === 'object';
                                       const text = isObj ? t.text : t;
                                       const color = isObj ? t.color : (idx % 2 === 0 ? "bg-red-500" : "bg-blue-600");
@@ -1152,11 +1154,6 @@ function CalculatorView({ config, onEstimateComplete, visits, isBlogMode, setBlo
                       <Calendar className="w-4 h-4" /> {selectedPost.date}
                     </div>
                   </div>
-
-                  {/* 썸네일 */}
-                  {selectedPost.thumbnail && (
-                    <SmartImage src={selectedPost.thumbnail} alt="Cover" className="w-full aspect-[4/3] sm:aspect-[21/9] object-cover rounded-2xl shadow-sm mb-10" />
-                  )}
 
                   {/* 블록 렌더링 */}
                   <div className="space-y-2">
